@@ -1,0 +1,22 @@
+PODS:
+  - Flutter (1.0.0)
+  - rwfit_ble (0.0.1):
+    - Flutter
+
+DEPENDENCIES:
+  - Flutter (from `Flutter`)
+  - rwfit_ble (from `.symlinks/plugins/rwfit_ble/ios`)
+
+EXTERNAL SOURCES:
+  Flutter:
+    :path: Flutter
+  rwfit_ble:
+    :path: ".symlinks/plugins/rwfit_ble/ios"
+
+SPEC CHECKSUMS:
+  Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
+  rwfit_ble: 04d69e8e323fe6a64906afc0502b5f96721319c0
+
+PODFILE CHECKSUM: 3c63482e143d1b91d2d2560aee9fb04ecc74ac7e
+
+COCOAPODS: 1.16.2
