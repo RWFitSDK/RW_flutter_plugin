@@ -48,6 +48,8 @@ flutter pub get          # 升级版本改 ref 后：flutter pub upgrade rwfit_b
 ```
 
 > iOS 首次构建会自动 `pod install`（无需自定义基座）。
+>
+> ⚠️ **Android 必读**：`pub get` 成功 ≠ 能构建。Android 还需在 App 的 `android/build.gradle.kts` 注册插件内置的原生 SDK 仓库，否则报 `Could not find com.rwfit:blesdk-rwfit:1.0`。见 [2.1 Android](#21-android)。
 
 ---
 
@@ -56,6 +58,42 @@ flutter pub get          # 升级版本改 ref 后：flutter pub upgrade rwfit_b
 ### 2.1 Android
 
 `android/app/build.gradle.kts`：`minSdk = 26`
+
+#### 必需：注册插件内置的原生 SDK 仓库 ⚠️
+
+插件随包内置了 RW 戒指原生 SDK 的 AAR（`com.rwfit:blesdk-rwfit`），位于插件目录的 `android/repo`。**Gradle 解析 `:app` 的传递依赖时用的是 App 自己的仓库列表，插件内部声明的仓库不会传递过来**，所以必须在 **App 侧**把插件目录下的 `repo` 注册为本地 maven 仓库，否则构建报：
+
+```
+Could not find com.rwfit:blesdk-rwfit:1.0.
+```
+
+在你的 App 根目录 `android/build.gradle.kts` 的 `allprojects.repositories` 中加一行（Kotlin DSL）：
+
+```kotlin
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+        // RWFIT 插件内置原生 SDK 仓库。用 :rwfit_ble 子工程的 projectDir，
+        // path 依赖与 git 依赖（pub-cache 路径带 commit hash）都自动适配，无需写死路径。
+        maven { url = uri("${project(":rwfit_ble").projectDir}/repo") }
+    }
+}
+```
+
+Groovy DSL（`android/build.gradle`）等价写法：
+
+```groovy
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+        maven { url "${project(':rwfit_ble').projectDir}/repo" }
+    }
+}
+```
+
+> 若 App 用了 `settings.gradle(.kts)` 的 `dependencyResolutionManagement { repositoriesMode = RepositoriesMode.FAIL_ON_PROJECT_REPOS }`，则需把上面的 `maven { ... }` 改加到 settings 的 `dependencyResolutionManagement.repositories` 里（同样用 `project(":rwfit_ble").projectDir`）。
 
 `AndroidManifest.xml`：
 
@@ -580,5 +618,5 @@ await ring.connect(device);
 | iOS 能否用模拟器 | **不支持 iOS 模拟器，仅支持真机**（模拟器无蓝牙；且插件已排除模拟器架构，Apple Silicon Mac 上跑模拟器会直接编译失败）。请用真机 |
 | Android 12 扫描失败 | 缺运行时 `BLUETOOTH_SCAN`/`BLUETOOTH_CONNECT` 权限 |
 | `minSdkVersion` 冲突 | App 的 `minSdk` 需 ≥ 26 |
-| 找不到 RW SDK | 已内置仓库，确保 git 依赖拉取成功即可（`flutter pub get` 无报错） |
+| `Could not find com.rwfit:blesdk-rwfit:1.0` | **不是缓存或拉取问题**：App 没注册插件内置的原生 SDK 仓库。在 App 的 `android/build.gradle.kts` 加 `maven { url = uri("${project(":rwfit_ble").projectDir}/repo") }`，见 [2.1 Android](#21-android)。反复 `flutter clean`／清 pub-cache 都无效 |
 | iOS "Module not found" | 确认 `pod install` 成功，`flutter clean` 后重新构建 |
