@@ -396,7 +396,7 @@ Supports `copyWith(...)` for modifying individual fields.
 | Method | Parameters | Returns | Description |
 |--------|-----------|---------|-------------|
 | `getVideoHid()` | None | `Future<int>` `hidOpen` value | Get HID mode |
-| `setVideoHid(int hidOpen)` | `hidOpen`: 0=off, 1=iOS mode, 2=Android mode, 3=auto | `Future<void>` | Set HID mode |
+| `setVideoHid(int hidOpen)` | `hidOpen`: 0=off, 1=video, 2=book, 3=music | `Future<void>` | Set HID mode |
 | `createOrRemoveBond(int type, String mac)` | `type`: 1=pair, 2=unpair; `mac`: device MAC | `Future<bool>` pairing result | **Android only**; iOS no-op returns false |
 
 ---

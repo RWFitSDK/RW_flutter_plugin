@@ -190,6 +190,8 @@ class RwfitBle {
 
   Future<int> getVideoHid() async =>
       (await callAsync('getVideoHid'))['hidOpen'] as int;
+
+  /// 设置 HID 模式。hidOpen: 0=关闭, 1=视频, 2=Book, 3=Music。
   Future<void> setVideoHid(int hidOpen) =>
       callAsync('setVideoHid', {'hidOpen': hidOpen});
 

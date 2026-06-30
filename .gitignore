@@ -1,6 +1,9 @@
 # 内部开发指导文档：本地保留参考，不对外提交
 /docs/RWFIT_Flutter插件开发文档.md
 
+# 原生 SDK 参考工程，仅本地查阅
+/RW_SDK_APP/
+
 # Miscellaneous
 *.class
 *.log

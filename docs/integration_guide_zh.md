@@ -396,7 +396,7 @@ get 返回 `Future<TimedConfig>`，set 接收 `TimedConfig` 返回 `Future<void>
 | 方法 | 参数 | 返回 | 说明 |
 |------|------|------|------|
 | `getVideoHid()` | 无 | `Future<int>` hidOpen 值 | 获取 HID 模式 |
-| `setVideoHid(int hidOpen)` | `hidOpen`: 0=关闭, 1=iOS模式, 2=Android模式, 3=自动 | `Future<void>` | 设置 HID 模式 |
+| `setVideoHid(int hidOpen)` | `hidOpen`: 0=关闭, 1=视频, 2=Book, 3=Music | `Future<void>` | 设置 HID 模式 |
 | `createOrRemoveBond(int type, String mac)` | `type`: 1=配对, 2=取消; `mac`: 设备 MAC | `Future<bool>` 配对结果 | **Android 专用**，iOS no-op 返回 false |
 
 ---
