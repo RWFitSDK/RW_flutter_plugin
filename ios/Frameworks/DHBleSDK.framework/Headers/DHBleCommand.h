@@ -38,6 +38,7 @@
 #import <DHBleSDK/DHDailyBpModel.h>
 #import <DHBleSDK/DHDailyPressureModel.h>
 #import <DHBleSDK/DHDailyBloodSugarModel.h>
+#import <DHBleSDK/DHDailyTempModel.h>
 #import <DHBleSDK/DHDailyMuslimCountModel.h>
 #import <DHBleSDK/DHVibrationLevelModel.h>
 #import <DHBleSDK/DHAncsSetModel.h>
@@ -160,6 +161,15 @@ NS_ASSUME_NONNULL_BEGIN
 /// @param block 回调
 + (void)setHrvMode:(DHHrvModeSetModel *)model block:(void(^)(int code, id data))block;
 
+/// 获取PPG定时监测
+/// @param block 回调
++ (void)getPPGMode:(void(^)(int code, id data))block;
+
+/// 设置PPG定时监测
+/// @param model 模型
+/// @param block 回调
++ (void)setPPGMode:(DHHrvModeSetModel *)model block:(void(^)(int code, id data))block;
+
 + (void)getStressMode:(void(^)(int code, id data))block;
 
 + (void)setStressMode:(DHStressModeSetModel *)model block:(void(^)(int code, id data))block;
@@ -177,18 +187,51 @@ NS_ASSUME_NONNULL_BEGIN
 /// @param block 回调
 + (void)setBpMode:(DHBpModeSetModel *)model block:(void(^)(int code, id data))block;
 
+/// 获取定时体温监测
+/// @param block 回调
++ (void)getTimedBodyTemperature:(void(^)(int code, id data))block;
+
+/// 设置定时体温监测
+/// @param model 模型(isOpen/startHour/startMinute/endHour/endMinute/interval)
+/// @param block 回调
++ (void)setTimedBodyTemperature:(DHHeartRateModeSetModel *)model block:(void(^)(int code, id data))block;
+
+/// 获取跌落提醒开关
+/// @param block 回调, data为NSNumber(0关/1开)
++ (void)getFallDetect:(void(^)(int code, id data))block;
+
+/// 设置跌落提醒开关
+/// @param enable 0:关 1:开
+/// @param block 回调
++ (void)setFallDetect:(UInt8)enable block:(void(^)(int code, id data))block;
+
+/// 获取计数提醒间隔
+/// @param block 回调, data为NSNumber(0关闭/30/60/90/120分钟)
++ (void)getCountReminderInterval:(void(^)(int code, id data))block;
+
+/// 设置计数提醒间隔
+/// @param interval 0:关闭 30/60/90/120:分钟
+/// @param block 回调
++ (void)setCountReminderInterval:(UInt8)interval block:(void(^)(int code, id data))block;
+
 #pragma mark- 传感器原始数据
 
 /// 控制传感器原始数据输出
 /// @param outputType 1: 开启Sensor输出 2: 关闭Sensor输出
-/// @param sensorType 1: PPG 2: ACC
+/// @param sensorType 1: ACC  2: PPG
 + (void)ringControlSensorRaw:(UInt8)outputType type:(UInt8)sensorType
                        block:(void(^)(int code, id data))block;
 
 /// 获取传感器历史原始数据
-/// @param block 同步完成回调
-/// @param dataBlock 数据回调, data为NSDictionary: sensorType, sequence, + 对应数据
+/// @param block 同步完成回调, code==0 表示同步完成
+/// @param dataBlock 数据回调, data为NSArray<NSDictionary>，每个元素包含 sensorType, sequence, count + 对应数据数组(ppgData/accData/ppgRedData/irData)
 + (void)ringGetHistorySensorRaw:(void(^)(int code, id data))block dataBlock:(void(^)(int code, int progress, id data))dataBlock;
+
+#pragma mark- 工厂测试与校正
+/// 启动工厂测试
+/// @param testMode 测试模式: 0x15=心率校正
+/// @param block 回调
++ (void)startFactoryTest:(UInt8)testMode block:(void(^)(int code, id data))block;
 
 
 #pragma mark- 健康数据---开启关闭单次检测
@@ -276,6 +319,16 @@ NS_ASSUME_NONNULL_BEGIN
 /// @param count 震动次数 0-6, 默认2次, 0为不震动
 /// @param block 回调
 + (void)setAlarmVibrationDuration:(UInt8)count block:(void(^)(int code, id data))block;
+
+#pragma mark- 震动间隔时长设置
+/// 获取震动间隔时长(ms)
+/// @param block 回调, data为NSNumber(100-1000)
++ (void)getVibrationInterval:(void(^)(int code, id data))block;
+
+/// 设置震动间隔时长(ms)
+/// @param intervalMs 间隔时长 100-1000ms, 默认500ms
+/// @param block 回调
++ (void)setVibrationInterval:(UInt16)intervalMs block:(void(^)(int code, id data))block;
 
 #pragma mark- Muslim时间显示模式
 

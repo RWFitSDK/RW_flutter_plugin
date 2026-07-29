@@ -81,6 +81,30 @@ class FunctionMenu {
     uuid: m['uuid'] as String?,
     raw: (m['supportMenu'] as Map?)?.cast<String, dynamic>() ?? const {},
   );
+
+  bool get supportsWorkout => raw['isSupportWorkout'] == true;
+}
+
+/// 设备当前多运动状态。
+class WorkoutState {
+  const WorkoutState({required this.sportType, required this.controlType});
+
+  final int sportType;
+  final WorkoutControlType controlType;
+
+  bool get isRunning => controlType.isRunning;
+
+  factory WorkoutState.fromMap(Map<dynamic, dynamic> m) => WorkoutState(
+    sportType: (m['sportType'] as num?)?.toInt() ?? 0,
+    controlType: WorkoutControlType.fromValue(
+      (m['controlType'] as num?)?.toInt() ?? -1,
+    ),
+  );
+
+  Map<String, dynamic> toMap() => {
+    'sportType': sportType,
+    'controlType': controlType.value,
+  };
 }
 
 /// 实时健康数据。`timestampMs` 为毫秒（桥接层已归一化，见开发文档 §3.4 单位陷阱）。
@@ -105,6 +129,40 @@ class RealtimeData {
   );
 }
 
+/// 多运动中的实时统计。
+class WorkoutRealtimeData {
+  const WorkoutRealtimeData({
+    required this.duration,
+    required this.steps,
+    required this.distance,
+    required this.calorie,
+    required this.heartRate,
+    required this.dataType,
+    required this.rawDataType,
+  });
+
+  final int duration; // 秒
+  final int steps;
+  final int distance; // 米
+  final int calorie; // 卡
+  final int heartRate;
+  final WorkoutDataType dataType;
+  final int rawDataType;
+
+  factory WorkoutRealtimeData.fromMap(Map<dynamic, dynamic> m) {
+    final rawDataType = (m['dataType'] as num?)?.toInt() ?? -1;
+    return WorkoutRealtimeData(
+      duration: (m['duration'] as num?)?.toInt() ?? 0,
+      steps: (m['steps'] as num?)?.toInt() ?? 0,
+      distance: (m['distance'] as num?)?.toInt() ?? 0,
+      calorie: (m['calorie'] as num?)?.toInt() ?? 0,
+      heartRate: (m['heartRate'] as num?)?.toInt() ?? 0,
+      dataType: WorkoutDataType.fromValue(rawDataType),
+      rawDataType: rawDataType,
+    );
+  }
+}
+
 /// 同步结果。`data` 为动态明细（不逐字段建模），原样给 App。
 class SyncResult {
   const SyncResult({required this.type, required this.data});
@@ -118,6 +176,111 @@ class SyncResult {
     data:
         (m['data'] as List?)
             ?.map((e) => (e as Map).cast<String, dynamic>())
+            .toList() ??
+        const [],
+  );
+}
+
+/// 多运动历史报告中的通用 index/value 项。
+class WorkoutValueItem {
+  const WorkoutValueItem({required this.index, required this.value});
+
+  final int index;
+  final int value;
+
+  factory WorkoutValueItem.fromMap(Map<dynamic, dynamic> m) => WorkoutValueItem(
+    index: (m['index'] as num?)?.toInt() ?? 0,
+    value: (m['value'] as num?)?.toInt() ?? 0,
+  );
+
+  Map<String, dynamic> toMap() => {'index': index, 'value': value};
+}
+
+/// 已保存的多运动报告。桥接层已统一 Android/iOS 字段名和数值类型。
+class WorkoutReport {
+  const WorkoutReport({
+    required this.startTime,
+    required this.endTime,
+    required this.date,
+    required this.sportType,
+    required this.duration,
+    required this.step,
+    required this.distance,
+    required this.calorie,
+    required this.height,
+    required this.pressure,
+    required this.cadence,
+    required this.speed,
+    required this.pace,
+    required this.averageHeartRate,
+    required this.maxHeartRate,
+    required this.minHeartRate,
+    required this.maxCadence,
+    required this.minCadence,
+    required this.maxPace,
+    required this.minPace,
+    required this.heartRateCount,
+    required this.viewType,
+    required this.heartRateItems,
+    required this.pacePerKmItems,
+  });
+
+  final int startTime; // 秒
+  final int endTime; // 秒
+  final String date; // yyyyMMdd
+  final int sportType;
+  final int duration; // 秒
+  final int step;
+  final int distance; // 米
+  final int calorie; // 卡
+  final int height;
+  final int pressure;
+  final int cadence;
+  final double speed;
+  final int pace;
+  final int averageHeartRate;
+  final int maxHeartRate;
+  final int minHeartRate;
+  final int maxCadence;
+  final int minCadence;
+  final int maxPace;
+  final int minPace;
+  final int heartRateCount;
+  final int viewType;
+  final List<WorkoutValueItem> heartRateItems;
+  final List<WorkoutValueItem> pacePerKmItems;
+
+  factory WorkoutReport.fromMap(Map<dynamic, dynamic> m) => WorkoutReport(
+    startTime: (m['startTime'] as num?)?.toInt() ?? 0,
+    endTime: (m['endTime'] as num?)?.toInt() ?? 0,
+    date: (m['date'] ?? '') as String,
+    sportType: (m['sportType'] as num?)?.toInt() ?? 0,
+    duration: (m['duration'] as num?)?.toInt() ?? 0,
+    step: (m['step'] as num?)?.toInt() ?? 0,
+    distance: (m['distance'] as num?)?.toInt() ?? 0,
+    calorie: (m['calorie'] as num?)?.toInt() ?? 0,
+    height: (m['height'] as num?)?.toInt() ?? 0,
+    pressure: (m['pressure'] as num?)?.toInt() ?? 0,
+    cadence: (m['cadence'] as num?)?.toInt() ?? 0,
+    speed: (m['speed'] as num?)?.toDouble() ?? 0,
+    pace: (m['pace'] as num?)?.toInt() ?? 0,
+    averageHeartRate: (m['averageHeartRate'] as num?)?.toInt() ?? 0,
+    maxHeartRate: (m['maxHeartRate'] as num?)?.toInt() ?? 0,
+    minHeartRate: (m['minHeartRate'] as num?)?.toInt() ?? 0,
+    maxCadence: (m['maxCadence'] as num?)?.toInt() ?? 0,
+    minCadence: (m['minCadence'] as num?)?.toInt() ?? 0,
+    maxPace: (m['maxPace'] as num?)?.toInt() ?? 0,
+    minPace: (m['minPace'] as num?)?.toInt() ?? 0,
+    heartRateCount: (m['heartRateCount'] as num?)?.toInt() ?? 0,
+    viewType: (m['viewType'] as num?)?.toInt() ?? 0,
+    heartRateItems:
+        (m['heartRateItems'] as List?)
+            ?.map((item) => WorkoutValueItem.fromMap(item as Map))
+            .toList() ??
+        const [],
+    pacePerKmItems:
+        (m['pacePerKmItems'] as List?)
+            ?.map((item) => WorkoutValueItem.fromMap(item as Map))
             .toList() ??
         const [],
   );

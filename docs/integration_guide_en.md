@@ -40,7 +40,7 @@ dependencies:
   rwfit_ble:
     git:
       url: https://github.com/RWFitSDK/RW_flutter_plugin.git
-      ref: v0.0.1   # Pin version; change this when upgrading
+      ref: v0.0.2   # Pin version; change this when upgrading
 ```
 
 ```bash
@@ -49,7 +49,7 @@ flutter pub get          # After changing ref: flutter pub upgrade rwfit_ble
 
 > The first iOS build automatically runs `pod install` (no custom native host setup is required).
 >
-> ⚠️ **Android required reading**: a successful `pub get` does not guarantee the app can build. Android also needs the plugin's bundled native SDK repository registered in the app's `android/build.gradle.kts`; otherwise, you'll get `Could not find com.rwfit:blesdk-rwfit:1.0`. See [2.1 Android](#21-android).
+> ⚠️ **Android required reading**: a successful `pub get` does not guarantee the app can build. Android also needs the plugin's bundled native SDK repository registered in the app's `android/build.gradle.kts`; otherwise, you'll get `Could not find com.rwfit:blesdk-rwfit:2.260724`. See [2.1 Android](#21-android).
 
 ---
 
@@ -64,7 +64,7 @@ flutter pub get          # After changing ref: flutter pub upgrade rwfit_ble
 The plugin bundles the RW ring native SDK AAR (`com.rwfit:blesdk-rwfit`) in its `android/repo` directory. **Gradle resolves `:app`'s transitive dependencies using the app's own repository list; repositories declared inside the plugin do not propagate**. You must register the plugin's `repo` directory as a local Maven repository on the **app side**; otherwise, the build fails with:
 
 ```
-Could not find com.rwfit:blesdk-rwfit:1.0.
+Could not find com.rwfit:blesdk-rwfit:2.260724.
 ```
 
 Add the following to your app's root `android/build.gradle.kts` in `allprojects.repositories` (Kotlin DSL):
@@ -202,7 +202,7 @@ await RwfitBle.instance.init();
 | `uuid` | `String?` | iOS only |
 | `raw` | `Map<String, dynamic>` | supportMenu capability map; the app uses this to show, hide, or disable UI |
 
-Typical `raw` (supportMenu) keys: `isStep`, `isSleep`, `isHr`, `isBloodOxy`, `isBloodPress`, `isBloodSugar`, `isHrv`, `isPressure`, `isBodyTemp`, `isAlarm`, `isBrightScreenTime`, `isBrightScreenSleepTime`, `isPushMsgEnableSwitch`, `isFindDevice`, `isTakePhoto`, `isSupportMotoVibrationLevel`, `isSupportAlarmVibrationDuration`, `isMuslimCountData`, `isSupportMuslimTimeDisplayMode`. All values are `bool`.
+Typical `raw` (supportMenu) keys: `isStep`, `isSleep`, `isHr`, `isBloodOxy`, `isBloodPress`, `isBloodSugar`, `isHrv`, `isPressure`, `isBodyTemp`, `isAlarm`, `isBrightScreenTime`, `isBrightScreenSleepTime`, `isPushMsgEnableSwitch`, `isFindDevice`, `isTakePhoto`, `isSupportMotoVibrationLevel`, `isSupportAlarmVibrationDuration`, `isMuslimCountData`, `isSupportMuslimTimeDisplayMode`, `isSupportWorkout`. All values are `bool`. `FunctionMenu.supportsWorkout` is the typed shortcut.
 
 ---
 
@@ -309,9 +309,105 @@ Each get method returns `Future<TimedConfig>`. Each set method accepts `TimedCon
 
 ---
 
-### 4.7 Device Control
+### 4.7 Multi-Sport Workout
 
-#### 4.7.1 Basic Controls
+Enable this feature only when `FunctionMenu.supportsWorkout == true`. Query the device state before starting a new workout to avoid replacing an active workout. Disconnecting or closing the app does not stop a workout on the device. A workout must exceed two minutes before the device saves a report.
+
+| Method / Stream | Parameters | Returns | Description |
+|----------------|------------|---------|-------------|
+| `getWorkoutState()` | None | `Future<WorkoutState>` | Query the current sport type and control state |
+| `controlWorkout(int sportType, WorkoutControlType type)` | `sportType`: 7–161; `type`: start/resume/pause/end | `Future<void>` | Control the workout state; throws `RwfitException` on failure |
+| `setWorkoutRealtimeEnabled(bool enabled)` | Enable/disable live data | `Future<void>` | Enable when entering the workout page and disable when leaving |
+| `onWorkoutRealtimeData` | — | `Stream<WorkoutRealtimeData>` | Live workout statistics |
+| `getWorkoutReports()` | None | `Future<List<WorkoutReport>>` | Sync saved workout reports |
+
+```dart
+final ring = RwfitBle.instance;
+
+final sub = ring.onWorkoutRealtimeData.listen((data) {
+  print('${data.duration}s, ${data.steps} steps, HR=${data.heartRate}');
+});
+await ring.setWorkoutRealtimeEnabled(true);
+
+final state = await ring.getWorkoutState();
+final sportType = state.isRunning ? state.sportType : 7; // 7=running
+if (!state.isRunning) {
+  await ring.controlWorkout(sportType, WorkoutControlType.start);
+}
+
+// Pause, resume, or end the workout in response to user actions.
+await ring.controlWorkout(sportType, WorkoutControlType.end);
+await ring.setWorkoutRealtimeEnabled(false);
+await sub.cancel();
+
+final reports = await ring.getWorkoutReports();
+```
+
+**`WorkoutState` fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `sportType` | `int` | Current sport type |
+| `controlType` | `WorkoutControlType` | Current control state |
+| `isRunning` | `bool` | Whether a workout is active |
+
+**`WorkoutControlType` enum:**
+
+| Value | int value | Description |
+|-------|-----------|-------------|
+| `WorkoutControlType.start` | `0x01` | Start |
+| `WorkoutControlType.resume` | `0x02` | Resume |
+| `WorkoutControlType.pause` | `0x03` | Pause |
+| `WorkoutControlType.end` | `0x04` | End |
+| `WorkoutControlType.unknown` | `-1` | Unrecognized state; must not be sent as a control parameter |
+
+**`WorkoutRealtimeData` fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `duration` | `int` | Workout duration in seconds |
+| `steps` | `int` | Step count |
+| `distance` | `int` | Distance in meters |
+| `calorie` | `int` | Calories in cal |
+| `heartRate` | `int` | Live heart rate |
+| `dataType` | `WorkoutDataType` | Data type |
+| `rawDataType` | `int` | Raw data type value for forward compatibility |
+
+**`WorkoutDataType` enum:**
+
+| Value | int value | Description |
+|-------|-----------|-------------|
+| `WorkoutDataType.appWorkoutData` | `0x0223` | Live workout data |
+| `WorkoutDataType.enterOrExitWorkout` | `0x0274` | Data produced when entering or exiting workout mode |
+| `WorkoutDataType.unknown` | `-1` | Unrecognized type; see `rawDataType` for the original value |
+
+**`WorkoutReport` fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `startTime` / `endTime` | `int` | Start/end Unix timestamp in seconds |
+| `date` | `String` | Date in `yyyyMMdd` format |
+| `sportType` | `int` | Sport type |
+| `duration` | `int` | Workout duration in seconds |
+| `step` / `distance` / `calorie` | `int` | Steps / distance in meters / calories in cal |
+| `height` / `pressure` | `int` | Height / air pressure |
+| `cadence` / `speed` / `pace` | `int` / `double` / `int` | Cadence / speed / pace |
+| `averageHeartRate` | `int` | Average heart rate |
+| `maxHeartRate` / `minHeartRate` | `int` | Maximum/minimum heart rate |
+| `maxCadence` / `minCadence` | `int` | Maximum/minimum cadence |
+| `maxPace` / `minPace` | `int` | Maximum/minimum pace |
+| `heartRateCount` | `int` | Number of heart-rate samples |
+| `viewType` | `int` | Workout data display type |
+| `heartRateItems` | `List<WorkoutValueItem>` | Heart-rate samples |
+| `pacePerKmItems` | `List<WorkoutValueItem>` | Per-kilometer pace samples |
+
+`WorkoutValueItem` contains two `int` fields: `index` and `value`.
+
+---
+
+### 4.8 Device Control
+
+#### 4.8.1 Basic Controls
 
 | Method | Parameters | Returns | Description |
 |--------|-----------|---------|-------------|
@@ -334,7 +430,7 @@ Each get method returns `Future<TimedConfig>`. Each set method accepts `TimedCon
 
 ---
 
-#### 4.7.2 Alarms
+#### 4.8.2 Alarms
 
 | Method | Parameters | Returns | Description |
 |--------|-----------|---------|-------------|
@@ -359,7 +455,7 @@ Supports `copyWith(...)` for modifying individual fields.
 
 ---
 
-#### 4.7.3 Screen Settings
+#### 4.8.3 Screen Settings
 
 | Method | Parameters | Returns | Description |
 |--------|-----------|---------|-------------|
@@ -391,7 +487,7 @@ Supports `copyWith(...)` for modifying individual fields.
 
 ---
 
-#### 4.7.4 Video HID
+#### 4.8.4 Video HID
 
 | Method | Parameters | Returns | Description |
 |--------|-----------|---------|-------------|
@@ -401,7 +497,7 @@ Supports `copyWith(...)` for modifying individual fields.
 
 ---
 
-#### 4.7.5 Wear Direction
+#### 4.8.5 Wear Direction
 
 | Method | Parameters | Returns | Description |
 |--------|-----------|---------|-------------|
@@ -410,7 +506,7 @@ Supports `copyWith(...)` for modifying individual fields.
 
 ---
 
-#### 4.7.6 Vibration
+#### 4.8.6 Vibration
 
 | Method | Parameters | Returns | Description |
 |--------|-----------|---------|-------------|
@@ -428,7 +524,7 @@ Supports `copyWith(...)` for modifying individual fields.
 
 ---
 
-### 4.8 Data Sync
+### 4.9 Data Sync
 
 | Method / Stream | Parameters | Returns | Description |
 |----------------|-----------|---------|-------------|
@@ -463,7 +559,7 @@ Supports `copyWith(...)` for modifying individual fields.
 
 ---
 
-### 4.9 OTA Upgrade
+### 4.10 OTA Upgrade
 
 | Method / Stream | Parameters | Returns | Description |
 |----------------|-----------|---------|-------------|
@@ -480,7 +576,7 @@ Supports `copyWith(...)` for modifying individual fields.
 
 ---
 
-### 4.10 Unbind
+### 4.11 Unbind
 
 | Method | Parameters | Returns | Description |
 |--------|-----------|---------|-------------|
@@ -488,7 +584,7 @@ Supports `copyWith(...)` for modifying individual fields.
 
 ---
 
-### 4.11 Message Push / Notification Switch
+### 4.12 Message Push / Notification Switch
 
 | Method | Parameters | Returns | Platform | Description |
 |--------|-----------|---------|----------|-------------|
@@ -618,5 +714,15 @@ await ring.connect(device);
 | Can iOS use simulator? | **No iOS simulator support; use a real device only**. The simulator has no Bluetooth support, and simulator architectures are excluded, so it will not compile on Apple Silicon Macs |
 | Android 12 scan fails | Runtime `BLUETOOTH_SCAN`/`BLUETOOTH_CONNECT` permissions are missing |
 | `minSdkVersion` conflict | App's `minSdk` must be ≥ 26 |
-| `Could not find com.rwfit:blesdk-rwfit:1.0` | **Not a cache or download issue**: the app has not registered the plugin's bundled native SDK repo. Add `maven { url = uri("${project(":rwfit_ble").projectDir}/repo") }` to your app's `android/build.gradle.kts`. See [2.1 Android](#21-android). Repeated `flutter clean` or pub-cache cleanup will not help |
+| `Could not find com.rwfit:blesdk-rwfit:2.260724` | **Not a cache or download issue**: the app has not registered the plugin's bundled native SDK repo. Add `maven { url = uri("${project(":rwfit_ble").projectDir}/repo") }` to your app's `android/build.gradle.kts`. See [2.1 Android](#21-android). Repeated `flutter clean` or pub-cache cleanup will not help |
 | iOS "Module not found" | Verify `pod install` succeeded, then `flutter clean` and rebuild |
+
+---
+
+## Flutter Plugin Revision History
+
+**v0.0.2_20260729** (2026.07.29)
+
+- Updated the native SDKs to Android `v2_260724` and iOS `DHBleSDK 1.1.8`
+- Added multi-sport state queries, workout controls, live workout data, and workout report APIs
+- Added workout type selection and live workout example pages

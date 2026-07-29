@@ -52,6 +52,7 @@ abstract final class RwfitEvents {
   static const connectState = 'rwfit:connectState';
   static const functionMenu = 'rwfit:functionMenu';
   static const healthData = 'rwfit:healthData';
+  static const workoutRealtimeData = 'rwfit:workoutRealtimeData';
   static const syncProgress = 'rwfit:syncProgress';
   static const syncResult = 'rwfit:syncResult';
   static const syncFinish = 'rwfit:syncFinish';

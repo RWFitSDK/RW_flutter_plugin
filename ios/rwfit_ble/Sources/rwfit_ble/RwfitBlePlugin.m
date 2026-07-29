@@ -62,7 +62,7 @@
     } else if ([m isEqualToString:@"getSDKVersion"]) {
         [self ok:result extra:@{@"version": [DHBleCommand getSDKVersion] ?: @""}];
     } else if ([m isEqualToString:@"getPluginVersion"]) {
-        NSString *v = [NSString stringWithFormat:@"0.0.1_%@", [DHBleCommand getSDKVersion] ?: @""];
+        NSString *v = [NSString stringWithFormat:@"0.0.2_%@", [DHBleCommand getSDKVersion] ?: @""];
         [self ok:result extra:@{@"pluginVersion": v}];
     } else if ([m isEqualToString:@"isBleConnected"]) {
         [self ok:result extra:@{@"connected": @([DHBleCentralManager isConnected])}];
@@ -164,6 +164,34 @@
         [DHBleCommand setRingBtName:[self stringValue:args[@"name"]] block:^(int code, id data) {
             [self simple:code result:result action:@"setRingBtName"];
         }];
+    } else if ([m isEqualToString:@"getWorkoutState"]) {
+        [DHBleCommand getControlSportWithRing:^(int code, id data) {
+            [self handleCode:code result:result successBlock:^{
+                if (![data isKindOfClass:[NSDictionary class]]) {
+                    [self fail:result code:-1 msg:@"getWorkoutState returned invalid data"];
+                    return;
+                }
+                NSDictionary *state = (NSDictionary *)data;
+                [self ok:result extra:@{
+                    @"sportType": state[@"keySportType"] ?: @0,
+                    @"controlType": state[@"keyControlType"] ?: @(-1)
+                }];
+            }];
+        }];
+    } else if ([m isEqualToString:@"controlWorkout"]) {
+        DHSportControlModel *model = [DHSportControlModel new];
+        model.sportType = [args[@"sportType"] integerValue];
+        model.controlType = [args[@"controlType"] integerValue];
+        [DHBleCommand controlSportWithRing:model block:^(int code, id data) {
+            [self simple:code result:result action:@"controlWorkout"];
+        }];
+    } else if ([m isEqualToString:@"setWorkoutRealtimeEnabled"]) {
+        UInt8 enabled = [args[@"enabled"] boolValue] ? 1 : 0;
+        [DHBleCommand setRingEnterWorkOut:enabled block:^(int code, id data) {
+            [self simple:code result:result action:@"setWorkoutRealtimeEnabled"];
+        }];
+    } else if ([m isEqualToString:@"getWorkoutReports"]) {
+        [self getWorkoutReports:result];
     } else if ([m isEqualToString:@"syncAllHealthData"]) {
         [self startHealthSync:result];
     } else if ([m isEqualToString:@"removeHealthDataCallback"]) {
@@ -510,6 +538,8 @@
                    name:BluetoothNotificationHealthRingMeasureValueChange object:nil];
     [center addObserver:self selector:@selector(handleCameraTakePicture:)
                    name:BluetoothNotificationCameraTakePicture object:nil];
+    [center addObserver:self selector:@selector(handleWorkoutRealtimeData:)
+                   name:BluetoothNotificationRingRuningData object:nil];
     self.observersRegistered = YES;
 }
 
@@ -541,6 +571,18 @@
 
 - (void)handleCameraTakePicture:(NSNotification *)notification {
     [self fire:@"rwfit:touchEvent" data:@{@"keyType": @0, @"touchType": @0, @"action": @"cameraTakePicture"}];
+}
+
+- (void)handleWorkoutRealtimeData:(NSNotification *)notification {
+    NSDictionary *data = notification.userInfo ?: @{};
+    [self fire:@"rwfit:workoutRealtimeData" data:@{
+        @"duration": data[@"ActivityTime"] ?: @0,
+        @"steps": data[@"ActivitySteps"] ?: @0,
+        @"distance": data[@"ActivityDistance"] ?: @0,
+        @"calorie": data[@"ActivityCalorie"] ?: @0,
+        @"heartRate": data[@"ActivityHr"] ?: @0,
+        @"dataType": data[@"ActivityDataType"] ?: @(-1)
+    }];
 }
 
 #pragma mark - 全天检测（6 项共用）
@@ -615,6 +657,94 @@
 
 - (NSDictionary *)ledDictionary:(DHLedLightSetModel *)model {
     return @{@"isOpen": @([model isOpen]), @"lcdLevel": @([model lightLevel])};
+}
+
+#pragma mark - 多运动报告
+
+- (void)getWorkoutReports:(FlutterResult)result {
+    __block NSMutableArray *reports = [NSMutableArray array];
+    __block BOOL replied = NO;
+    [DHBleCommand startRingWorkout3Syncing:^(int code, id data) {
+        if (replied) return;
+        replied = YES;
+        if (code == 0) {
+            [self ok:result extra:@{@"data": reports}];
+        } else {
+            [self fail:result code:code msg:@"getWorkoutReports failed"];
+        }
+    } dataBlock:^(int code, int progress, id data) {
+        if (replied) return;
+        if (code != 0) {
+            replied = YES;
+            [self fail:result code:code msg:@"getWorkoutReports failed"];
+            return;
+        }
+        if (![data isKindOfClass:[NSArray class]]) return;
+        for (id item in (NSArray *)data) {
+            if ([item isKindOfClass:[DHDailySportModel class]]) {
+                [reports addObject:[self workoutReportDictionary:(DHDailySportModel *)item]];
+            }
+        }
+    }];
+}
+
+- (NSDictionary *)workoutReportDictionary:(DHDailySportModel *)model {
+    long long startTime = [model.timestamp longLongValue];
+    long long endTime = startTime > 0 ? startTime + model.duration : 0;
+    NSString *date = model.date.length > 0 ? model.date : [self workoutDateFromTimestamp:startTime];
+    return @{
+        @"startTime": @(startTime),
+        @"endTime": @(endTime),
+        @"date": date ?: @"",
+        @"sportType": @(model.type),
+        @"duration": @(model.duration),
+        @"step": @(model.step),
+        @"distance": @(model.distance),
+        @"calorie": @(model.calorie),
+        @"height": @(model.sportHeight),
+        @"pressure": @(model.sportPress),
+        @"cadence": @(model.sportStepFreq),
+        @"speed": @((double)model.sportSpeed),
+        @"pace": @(model.pace),
+        @"averageHeartRate": @(model.heartAve),
+        @"maxHeartRate": @(model.heartMax),
+        @"minHeartRate": @(model.heartMin),
+        @"maxCadence": @(model.maxStepFreq),
+        @"minCadence": @(model.minStepFreq),
+        @"maxPace": @(model.sportMaxPace),
+        @"minPace": @(model.sportMinPace),
+        @"heartRateCount": @(model.sportHeartNum),
+        @"viewType": @(model.viewType),
+        @"heartRateItems": [self workoutValueItems:model.heartRateItems],
+        @"pacePerKmItems": [self workoutValueItems:model.pacePerKmItems]
+    };
+}
+
+- (NSArray *)workoutValueItems:(NSArray *)rawItems {
+    if (![rawItems isKindOfClass:[NSArray class]]) return @[];
+    NSMutableArray *items = [NSMutableArray array];
+    NSInteger fallbackIndex = 0;
+    for (id raw in rawItems) {
+        if ([raw isKindOfClass:[NSDictionary class]]) {
+            NSDictionary *item = (NSDictionary *)raw;
+            [items addObject:@{
+                @"index": item[@"index"] ?: @(fallbackIndex),
+                @"value": item[@"value"] ?: @0
+            }];
+        } else if ([raw respondsToSelector:@selector(integerValue)]) {
+            [items addObject:@{@"index": @(fallbackIndex), @"value": @([raw integerValue])}];
+        }
+        fallbackIndex++;
+    }
+    return items;
+}
+
+- (NSString *)workoutDateFromTimestamp:(long long)timestamp {
+    if (timestamp <= 0) return @"";
+    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+    formatter.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+    formatter.dateFormat = @"yyyyMMdd";
+    return [formatter stringFromDate:[NSDate dateWithTimeIntervalSince1970:timestamp]];
 }
 
 #pragma mark - 健康数据同步
@@ -826,7 +956,8 @@
         @"isSupportMotoVibrationLevel": @([model isSupportMotoVibrationLevel]),
         @"isSupportAlarmVibrationDuration": @([model isSupportAlarmVibrationDuration]),
         @"isMuslimCountData": @([model isDataTypeMuslimCount]),
-        @"isSupportMuslimTimeDisplayMode": @([model isSupportMuslimTimeDisplayMode])
+        @"isSupportMuslimTimeDisplayMode": @([model isSupportMuslimTimeDisplayMode]),
+        @"isSupportWorkout": @([model isSupportWorkout3])
     };
 }
 

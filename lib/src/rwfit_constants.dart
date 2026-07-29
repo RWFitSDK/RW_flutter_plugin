@@ -52,6 +52,45 @@ enum PowerOffType {
 /// 从 [RwfitBle.onFunctionMenu] 收，不会从 onConnectState 收到 ready。
 enum ConnectState { connecting, connected, disconnected, failed }
 
+/// 多运动控制状态。数值与 Android/iOS 原生 SDK 的 WorkoutControlType 一致。
+enum WorkoutControlType {
+  start(0x01),
+  resume(0x02),
+  pause(0x03),
+  end(0x04),
+  unknown(-1);
+
+  const WorkoutControlType(this.value);
+  final int value;
+
+  bool get isRunning => this == start || this == resume || this == pause;
+
+  static WorkoutControlType fromValue(int value) {
+    return values.firstWhere(
+      (item) => item.value == value,
+      orElse: () => WorkoutControlType.unknown,
+    );
+  }
+}
+
+/// 多运动实时数据来源。iOS 用同一个通知名承载这两种数据；
+/// Android 的 SportDataPushCallback 对应 [appWorkoutData]。
+enum WorkoutDataType {
+  appWorkoutData(0x0223),
+  enterOrExitWorkout(0x0274),
+  unknown(-1);
+
+  const WorkoutDataType(this.value);
+  final int value;
+
+  static WorkoutDataType fromValue(int value) {
+    return values.firstWhere(
+      (item) => item.value == value,
+      orElse: () => WorkoutDataType.unknown,
+    );
+  }
+}
+
 /// 触摸 / 物理键 / 拍照 / 音乐动作，全部经 rwfit:touchEvent 上报（无独立 music 事件）。
 enum TouchAction {
   cameraTakePicture,

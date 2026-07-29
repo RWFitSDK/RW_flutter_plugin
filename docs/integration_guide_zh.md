@@ -40,7 +40,7 @@ dependencies:
   rwfit_ble:
     git:
       url: https://github.com/RWFitSDK/RW_flutter_plugin.git
-      ref: v0.0.1   # 锁定版本，升级时改这里
+      ref: v0.0.2   # 锁定版本，升级时改这里
 ```
 
 ```bash
@@ -49,7 +49,7 @@ flutter pub get          # 升级版本改 ref 后：flutter pub upgrade rwfit_b
 
 > iOS 首次构建会自动 `pod install`（无需自定义基座）。
 >
-> ⚠️ **Android 必读**：`pub get` 成功 ≠ 能构建。Android 还需在 App 的 `android/build.gradle.kts` 注册插件内置的原生 SDK 仓库，否则报 `Could not find com.rwfit:blesdk-rwfit:1.0`。见 [2.1 Android](#21-android)。
+> ⚠️ **Android 必读**：`pub get` 成功 ≠ 能构建。Android 还需在 App 的 `android/build.gradle.kts` 注册插件内置的原生 SDK 仓库，否则报 `Could not find com.rwfit:blesdk-rwfit:2.260724`。见 [2.1 Android](#21-android)。
 
 ---
 
@@ -64,7 +64,7 @@ flutter pub get          # 升级版本改 ref 后：flutter pub upgrade rwfit_b
 插件随包内置了 RW 戒指原生 SDK 的 AAR（`com.rwfit:blesdk-rwfit`），位于插件目录的 `android/repo`。**Gradle 解析 `:app` 的传递依赖时用的是 App 自己的仓库列表，插件内部声明的仓库不会传递过来**，所以必须在 **App 侧**把插件目录下的 `repo` 注册为本地 maven 仓库，否则构建报：
 
 ```
-Could not find com.rwfit:blesdk-rwfit:1.0.
+Could not find com.rwfit:blesdk-rwfit:2.260724.
 ```
 
 在你的 App 根目录 `android/build.gradle.kts` 的 `allprojects.repositories` 中加一行（Kotlin DSL）：
@@ -202,7 +202,7 @@ await RwfitBle.instance.init();
 | `uuid` | `String?` | 仅 iOS |
 | `raw` | `Map<String, dynamic>` | supportMenu 能力表，App 据此做按钮灰显/隐藏 |
 
-`raw` (supportMenu) 典型 key：`isStep`, `isSleep`, `isHr`, `isBloodOxy`, `isBloodPress`, `isBloodSugar`, `isHrv`, `isPressure`, `isBodyTemp`, `isAlarm`, `isBrightScreenTime`, `isBrightScreenSleepTime`, `isPushMsgEnableSwitch`, `isFindDevice`, `isTakePhoto`, `isSupportMotoVibrationLevel`, `isSupportAlarmVibrationDuration`, `isMuslimCountData`, `isSupportMuslimTimeDisplayMode`。值均为 `bool`。
+`raw` (supportMenu) 典型 key：`isStep`, `isSleep`, `isHr`, `isBloodOxy`, `isBloodPress`, `isBloodSugar`, `isHrv`, `isPressure`, `isBodyTemp`, `isAlarm`, `isBrightScreenTime`, `isBrightScreenSleepTime`, `isPushMsgEnableSwitch`, `isFindDevice`, `isTakePhoto`, `isSupportMotoVibrationLevel`, `isSupportAlarmVibrationDuration`, `isMuslimCountData`, `isSupportMuslimTimeDisplayMode`, `isSupportWorkout`。值均为 `bool`。也可直接使用 `FunctionMenu.supportsWorkout`。
 
 ---
 
@@ -309,9 +309,105 @@ get 返回 `Future<TimedConfig>`，set 接收 `TimedConfig` 返回 `Future<void>
 
 ---
 
-### 4.7 设备控制
+### 4.7 多运动
 
-#### 4.7.1 基本控制
+仅在 `FunctionMenu.supportsWorkout == true` 时启用此功能。开始新运动前应先查询设备状态，避免覆盖正在进行的运动。App 断开或关闭不会结束设备上的运动；运动时长超过 2 分钟后，设备才会保存历史报告。
+
+| 方法 / Stream | 参数 | 返回 | 说明 |
+|--------------|------|------|------|
+| `getWorkoutState()` | 无 | `Future<WorkoutState>` | 查询当前运动类型与控制状态 |
+| `controlWorkout(int sportType, WorkoutControlType type)` | `sportType`: 7～161；`type`: 开始/继续/暂停/结束 | `Future<void>` | 控制运动状态；失败时抛出 `RwfitException` |
+| `setWorkoutRealtimeEnabled(bool enabled)` | 是否开启实时数据 | `Future<void>` | 进入运动页面时开启，离开页面时关闭 |
+| `onWorkoutRealtimeData` | — | `Stream<WorkoutRealtimeData>` | 实时运动统计 |
+| `getWorkoutReports()` | 无 | `Future<List<WorkoutReport>>` | 同步设备保存的运动报告 |
+
+```dart
+final ring = RwfitBle.instance;
+
+final sub = ring.onWorkoutRealtimeData.listen((data) {
+  print('${data.duration}s, ${data.steps} steps, HR=${data.heartRate}');
+});
+await ring.setWorkoutRealtimeEnabled(true);
+
+final state = await ring.getWorkoutState();
+final sportType = state.isRunning ? state.sportType : 7; // 7=跑步
+if (!state.isRunning) {
+  await ring.controlWorkout(sportType, WorkoutControlType.start);
+}
+
+// 根据用户操作暂停、继续或结束运动。
+await ring.controlWorkout(sportType, WorkoutControlType.end);
+await ring.setWorkoutRealtimeEnabled(false);
+await sub.cancel();
+
+final reports = await ring.getWorkoutReports();
+```
+
+**`WorkoutState` 字段：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `sportType` | `int` | 当前运动类型 |
+| `controlType` | `WorkoutControlType` | 当前控制状态 |
+| `isRunning` | `bool` | 是否存在正在进行的运动 |
+
+**`WorkoutControlType` 枚举：**
+
+| 值 | int value | 说明 |
+|----|-----------|------|
+| `WorkoutControlType.start` | `0x01` | 开始 |
+| `WorkoutControlType.resume` | `0x02` | 继续 |
+| `WorkoutControlType.pause` | `0x03` | 暂停 |
+| `WorkoutControlType.end` | `0x04` | 结束 |
+| `WorkoutControlType.unknown` | `-1` | 未识别状态；不可作为控制参数发送 |
+
+**`WorkoutRealtimeData` 字段：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `duration` | `int` | 运动时长（秒） |
+| `steps` | `int` | 步数 |
+| `distance` | `int` | 距离（米） |
+| `calorie` | `int` | 热量（卡） |
+| `heartRate` | `int` | 实时心率 |
+| `dataType` | `WorkoutDataType` | 数据类型 |
+| `rawDataType` | `int` | 数据类型原始值，用于兼容新增类型 |
+
+**`WorkoutDataType` 枚举：**
+
+| 值 | int value | 说明 |
+|----|-----------|------|
+| `WorkoutDataType.appWorkoutData` | `0x0223` | 运动过程中的实时数据 |
+| `WorkoutDataType.enterOrExitWorkout` | `0x0274` | 进入或退出运动模式时的数据 |
+| `WorkoutDataType.unknown` | `-1` | 未识别类型；原始值见 `rawDataType` |
+
+**`WorkoutReport` 字段：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `startTime` / `endTime` | `int` | 开始/结束时间戳（秒） |
+| `date` | `String` | 日期，格式 `yyyyMMdd` |
+| `sportType` | `int` | 运动类型 |
+| `duration` | `int` | 运动时长（秒） |
+| `step` / `distance` / `calorie` | `int` | 步数 / 距离（米）/ 热量（卡） |
+| `height` / `pressure` | `int` | 高度 / 气压 |
+| `cadence` / `speed` / `pace` | `int` / `double` / `int` | 步频 / 速度 / 配速 |
+| `averageHeartRate` | `int` | 平均心率 |
+| `maxHeartRate` / `minHeartRate` | `int` | 最大/最小心率 |
+| `maxCadence` / `minCadence` | `int` | 最大/最小步频 |
+| `maxPace` / `minPace` | `int` | 最大/最小配速 |
+| `heartRateCount` | `int` | 心率数据数量 |
+| `viewType` | `int` | 运动数据显示类型 |
+| `heartRateItems` | `List<WorkoutValueItem>` | 心率明细 |
+| `pacePerKmItems` | `List<WorkoutValueItem>` | 每公里配速明细 |
+
+`WorkoutValueItem` 包含 `index` 和 `value` 两个 `int` 字段。
+
+---
+
+### 4.8 设备控制
+
+#### 4.8.1 基本控制
 
 | 方法 | 参数 | 返回 | 说明 |
 |------|------|------|------|
@@ -334,7 +430,7 @@ get 返回 `Future<TimedConfig>`，set 接收 `TimedConfig` 返回 `Future<void>
 
 ---
 
-#### 4.7.2 闹钟
+#### 4.8.2 闹钟
 
 | 方法 | 参数 | 返回 | 说明 |
 |------|------|------|------|
@@ -359,7 +455,7 @@ get 返回 `Future<TimedConfig>`，set 接收 `TimedConfig` 返回 `Future<void>
 
 ---
 
-#### 4.7.3 屏幕设置
+#### 4.8.3 屏幕设置
 
 | 方法 | 参数 | 返回 | 说明 |
 |------|------|------|------|
@@ -391,7 +487,7 @@ get 返回 `Future<TimedConfig>`，set 接收 `TimedConfig` 返回 `Future<void>
 
 ---
 
-#### 4.7.4 视频 HID
+#### 4.8.4 视频 HID
 
 | 方法 | 参数 | 返回 | 说明 |
 |------|------|------|------|
@@ -401,7 +497,7 @@ get 返回 `Future<TimedConfig>`，set 接收 `TimedConfig` 返回 `Future<void>
 
 ---
 
-#### 4.7.5 佩戴方向
+#### 4.8.5 佩戴方向
 
 | 方法 | 参数 | 返回 | 说明 |
 |------|------|------|------|
@@ -410,7 +506,7 @@ get 返回 `Future<TimedConfig>`，set 接收 `TimedConfig` 返回 `Future<void>
 
 ---
 
-#### 4.7.6 振动
+#### 4.8.6 振动
 
 | 方法 | 参数 | 返回 | 说明 |
 |------|------|------|------|
@@ -428,7 +524,7 @@ get 返回 `Future<TimedConfig>`，set 接收 `TimedConfig` 返回 `Future<void>
 
 ---
 
-### 4.8 数据同步
+### 4.9 数据同步
 
 | 方法 / Stream | 参数 | 返回 | 说明 |
 |--------------|------|------|------|
@@ -463,7 +559,7 @@ get 返回 `Future<TimedConfig>`，set 接收 `TimedConfig` 返回 `Future<void>
 
 ---
 
-### 4.9 OTA 升级
+### 4.10 OTA 升级
 
 | 方法 / Stream | 参数 | 返回 | 说明 |
 |--------------|------|------|------|
@@ -480,7 +576,7 @@ get 返回 `Future<TimedConfig>`，set 接收 `TimedConfig` 返回 `Future<void>
 
 ---
 
-### 4.10 解绑
+### 4.11 解绑
 
 | 方法 | 参数 | 返回 | 说明 |
 |------|------|------|------|
@@ -488,7 +584,7 @@ get 返回 `Future<TimedConfig>`，set 接收 `TimedConfig` 返回 `Future<void>
 
 ---
 
-### 4.11 消息推送 / 通知开关
+### 4.12 消息推送 / 通知开关
 
 | 方法 | 参数 | 返回 | 平台 | 说明 |
 |------|------|------|------|------|
@@ -618,5 +714,15 @@ await ring.connect(device);
 | iOS 能否用模拟器 | **不支持 iOS 模拟器，仅支持真机**（模拟器无蓝牙；且插件已排除模拟器架构，Apple Silicon Mac 上跑模拟器会直接编译失败）。请用真机 |
 | Android 12 扫描失败 | 缺运行时 `BLUETOOTH_SCAN`/`BLUETOOTH_CONNECT` 权限 |
 | `minSdkVersion` 冲突 | App 的 `minSdk` 需 ≥ 26 |
-| `Could not find com.rwfit:blesdk-rwfit:1.0` | **不是缓存或拉取问题**：App 没注册插件内置的原生 SDK 仓库。在 App 的 `android/build.gradle.kts` 加 `maven { url = uri("${project(":rwfit_ble").projectDir}/repo") }`，见 [2.1 Android](#21-android)。反复 `flutter clean`／清 pub-cache 都无效 |
+| `Could not find com.rwfit:blesdk-rwfit:2.260724` | **不是缓存或拉取问题**：App 没注册插件内置的原生 SDK 仓库。在 App 的 `android/build.gradle.kts` 加 `maven { url = uri("${project(":rwfit_ble").projectDir}/repo") }`，见 [2.1 Android](#21-android)。反复 `flutter clean`／清 pub-cache 都无效 |
 | iOS "Module not found" | 确认 `pod install` 成功，`flutter clean` 后重新构建 |
+
+---
+
+## Flutter 插件修订记录
+
+**v0.0.2_20260729** (2026.07.29)
+
+- 原生 SDK 更新为 Android `v2_260724`、iOS `DHBleSDK 1.1.8`
+- 新增多运动状态查询、运动控制、实时运动数据和历史运动报告接口
+- 新增运动类型列表和实时运动示例页面

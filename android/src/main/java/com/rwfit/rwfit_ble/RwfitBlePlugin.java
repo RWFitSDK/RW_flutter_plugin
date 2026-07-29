@@ -10,12 +10,16 @@ import android.view.KeyEvent;
 
 import androidx.annotation.NonNull;
 
+import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import com.example.blesdk.DHBleSdk;
@@ -27,7 +31,9 @@ import com.example.blesdk.callback.OnFileTransferCallback;
 import com.example.blesdk.callback.data.*;
 import com.example.blesdk.callback.status.*;
 import com.example.blesdk.utils.BlueToothUtils;
+import com.example.blesdk.utils.BleActivityMode;
 import com.example.blesdk.utils.CmdConstants;
+import com.example.blesdk.utils.WorkoutControlType;
 
 import io.flutter.embedding.engine.plugins.FlutterPlugin;
 import io.flutter.embedding.engine.plugins.activity.ActivityAware;
@@ -47,7 +53,7 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
         EventChannel.StreamHandler, ActivityAware {
 
     private static final String TAG = "RwfitBlePlugin";
-    private static final String PLUGIN_VERSION = "0.0.1";
+    private static final String PLUGIN_VERSION = "0.0.2";
 
     private MethodChannel methodChannel;
     private EventChannel eventChannel;
@@ -57,6 +63,7 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
 
     // 长期订阅引用（切换/重设时先 dispose 旧的，避免事件叠加）
     private HealthDataBroCallback realtimeDataCallback;
+    private SportDataPushCallback workoutRealtimeCallback;
     private TakePhotoCallback takePhotoEventCallback;
     private MusicPushSettingCallback musicControlEventCallback;
 
@@ -79,6 +86,10 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
 
     @Override
     public void onDetachedFromEngine(@NonNull FlutterPluginBinding binding) {
+        if (workoutRealtimeCallback != null) {
+            DHBleSdk.INSTANCE.dispose(workoutRealtimeCallback);
+            workoutRealtimeCallback = null;
+        }
         methodChannel.setMethodCallHandler(null);
         eventChannel.setStreamHandler(null);
     }
@@ -204,6 +215,11 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
                 case "setTimeFormat": setTimeFormat(call, result); break;
                 case "getFunctionList": getFunctionList(result); break;
                 case "setRingBtName": setRingBtName(call, result); break;
+                // ---- 多运动 ----
+                case "getWorkoutState": getWorkoutState(result); break;
+                case "controlWorkout": controlWorkout(call, result); break;
+                case "setWorkoutRealtimeEnabled": setWorkoutRealtimeEnabled(call, result); break;
+                case "getWorkoutReports": getWorkoutReports(result); break;
                 // ---- 全天检测 ----
                 case "getTimedHeartRate": getTimed(result, "hr"); break;
                 case "setTimedHeartRate": setTimed(call, result, "hr"); break;
@@ -323,6 +339,198 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
             }
         });
         DHBleSdk.INSTANCE.getFirmwareVersionJL();
+    }
+
+    // ==================== 多运动 ====================
+
+    private void getWorkoutState(final Reply result) {
+        DHBleSdk.INSTANCE.subscribeData(new SportGetControlCallback() {
+            @Override public void onSuccess() {}
+
+            @Override public void onFail(int errorCode) {
+                result.error(errorCode, "getWorkoutState failed");
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+
+            @Override public void onResult(NewSportBean data) {
+                if (data == null) {
+                    result.error(-1, "getWorkoutState returned empty data");
+                } else {
+                    Map<String, Object> response = success();
+                    response.put("sportType",
+                            data.getSportType() != null ? data.getSportType().getValue() : 0);
+                    response.put("controlType",
+                            data.getStatus() != null ? data.getStatus().getValue() : -1);
+                    result.success(response);
+                }
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+        });
+        DHBleSdk.INSTANCE.controlGetSportJLData();
+    }
+
+    private void controlWorkout(MethodCall call, final Reply result) {
+        BleActivityMode sportType = BleActivityMode.Companion.fromValue(i(call, "sportType"));
+        WorkoutControlType controlType =
+                WorkoutControlType.Companion.fromValue(i(call, "controlType"));
+        if (sportType == null || controlType == null) {
+            result.error(-1, "invalid sportType or controlType");
+            return;
+        }
+
+        DHBleSdk.INSTANCE.subscribeData(new SportControlCallback() {
+            @Override public void onResult(NewSportBean data) {
+                // 等设备返回实际控制结果后再完成 Future，避免紧接着查询到旧状态。
+                result.success(success());
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+
+            @Override public void onFail(int errorCode) {
+                result.error(errorCode, "controlWorkout failed");
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+
+            @Override public void onSuccess() {}
+        });
+        DHBleSdk.INSTANCE.controlSportJL(sportType, controlType);
+    }
+
+    private void setWorkoutRealtimeEnabled(MethodCall call, Reply result) {
+        boolean enabled = b(call, "enabled");
+        if (workoutRealtimeCallback != null) {
+            DHBleSdk.INSTANCE.dispose(workoutRealtimeCallback);
+            workoutRealtimeCallback = null;
+        }
+
+        if (enabled) {
+            workoutRealtimeCallback = new SportDataPushCallback() {
+                @Override public void onSuccess() {}
+                @Override public void onFail(int errorCode) {}
+
+                @Override public void onResult(SportDataPushBean data) {
+                    if (data == null) return;
+                    JSONObject event = new JSONObject();
+                    event.put("duration", asInt(data.gettActivityTime()));
+                    event.put("steps", asInt(data.gettActivitySteps()));
+                    event.put("distance", asInt(data.gettActivityDistance()));
+                    event.put("calorie", asInt(data.gettActivityCalorie()));
+                    event.put("heartRate", asInt(data.gettActivityHr()));
+                    // Android SportDataPushCallback 对应 iOS 的 BLE_KEY_APP_WORKOUT_DATA。
+                    event.put("dataType", 0x0223);
+                    fireEvent("rwfit:workoutRealtimeData", event);
+                }
+            };
+            DHBleSdk.INSTANCE.subscribeData(workoutRealtimeCallback);
+        }
+
+        DHBleSdk.INSTANCE.setExerciseMore(enabled ? 1 : 0);
+        result.success(success());
+    }
+
+    private void getWorkoutReports(final Reply result) {
+        DHBleSdk.INSTANCE.subscribeData(new Sport3ResultCallback() {
+            @Override public void onSuccess() {}
+
+            @Override public void onFail(int errorCode) {
+                result.error(errorCode, "getWorkoutReports failed");
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+
+            @Override public void onResult(List<SportResultBean> data) {
+                JSONArray reports = new JSONArray();
+                if (data != null) {
+                    for (SportResultBean item : data) {
+                        if (item != null) reports.add(workoutReportPayload(item));
+                    }
+                }
+                Map<String, Object> response = success();
+                response.put("data", toCodecSafe(reports));
+                result.success(response);
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+        });
+        DHBleSdk.INSTANCE.getSport3ResultJL();
+    }
+
+    private JSONObject workoutReportPayload(SportResultBean item) {
+        long startTime = item.getStartTime();
+        long endTime = item.getEndTime();
+        if (endTime <= 0 && startTime > 0) endTime = startTime + item.getExerciseTime();
+
+        JSONObject report = new JSONObject();
+        report.put("startTime", startTime);
+        report.put("endTime", endTime);
+        report.put("date", workoutDate(startTime));
+        report.put("sportType", item.getWorkModel());
+        report.put("duration", item.getExerciseTime());
+        report.put("step", item.getStep());
+        report.put("distance", item.getDistance());
+        report.put("calorie", item.getCalorie());
+        report.put("height", item.getHeight());
+        report.put("pressure", item.getBarometricPressure());
+        report.put("cadence", item.getCadence());
+        report.put("speed", (double) item.getSpeed());
+        report.put("pace", item.getPace());
+        report.put("averageHeartRate", item.getAverageHr());
+        report.put("maxHeartRate", item.getMaxHr());
+        report.put("minHeartRate", item.getMinHr());
+        report.put("maxCadence", item.getMaxCadence());
+        report.put("minCadence", item.getMinCadence());
+        report.put("maxPace", item.getMaxPace());
+        report.put("minPace", item.getMinPace());
+        report.put("heartRateCount", item.getHrCount());
+        report.put("viewType", item.getViewType());
+        report.put("heartRateItems", workoutValueItems(item.getNewSportHrs()));
+        report.put("pacePerKmItems", workoutValueItems(item.getPacePerKmList()));
+        return report;
+    }
+
+    private String workoutDate(long timestampSeconds) {
+        if (timestampSeconds <= 0) return "";
+        return new SimpleDateFormat("yyyyMMdd", Locale.US)
+                .format(new Date(timestampSeconds * 1000L));
+    }
+
+    private JSONArray workoutValueItems(String raw) {
+        JSONArray result = new JSONArray();
+        if (raw == null || raw.trim().isEmpty()) return result;
+        try {
+            Object parsed = JSON.parse(raw);
+            if (parsed instanceof JSONArray) {
+                int fallbackIndex = 0;
+                for (Object value : (JSONArray) parsed) {
+                    JSONObject item = new JSONObject();
+                    if (value instanceof Map) {
+                        Map<?, ?> map = (Map<?, ?>) value;
+                        item.put("index", asInt(map.get("index")));
+                        item.put("value", asInt(map.get("value")));
+                    } else {
+                        item.put("index", fallbackIndex);
+                        item.put("value", asInt(value));
+                    }
+                    result.add(item);
+                    fallbackIndex++;
+                }
+                return result;
+            }
+        } catch (Exception ignored) {
+            // 兼容旧固件用逗号分隔纯数值的格式。
+        }
+
+        String normalized = raw.trim().replace("[", "").replace("]", "");
+        if (normalized.isEmpty()) return result;
+        String[] values = normalized.split(",");
+        for (int index = 0; index < values.length; index++) {
+            try {
+                JSONObject item = new JSONObject();
+                item.put("index", index);
+                item.put("value", Integer.parseInt(values[index].trim()));
+                result.add(item);
+            } catch (NumberFormatException ignored) {
+                Log.w(TAG, "ignore invalid workout item: " + values[index]);
+            }
+        }
+        return result;
     }
 
     private void controlHealthData(MethodCall call, final Reply result) {
@@ -492,7 +700,7 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
         menu.put("isBloodSugar", bean.isBloodSugar());
         menu.put("isHrv", bean.isHrv());
         menu.put("isPressure", bean.isPressure());
-        menu.put("isBodyTemp", bean.isBodyTemp());
+        menu.put("isBodyTemp", bean.isDataTypeTemperature());
         menu.put("isAlarm", bean.isAlarm());
         menu.put("isBrightScreenTime", bean.isBrightScreenTime());
         menu.put("isBrightScreenSleepTime", bean.isBrightScreenSleepTime());
@@ -1111,7 +1319,13 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
     private float f(MethodCall c, String k) { Object v = c.argument(k); return v instanceof Number ? ((Number) v).floatValue() : 0f; }
     private boolean b(MethodCall c, String k) { Boolean v = c.argument(k); return v != null && v; }
     private String s(MethodCall c, String k) { Object v = c.argument(k); return v instanceof String ? (String) v : ""; }
-    private static int asInt(Object v) { return v instanceof Number ? ((Number) v).intValue() : 0; }
+    private static int asInt(Object v) {
+        if (v instanceof Number) return ((Number) v).intValue();
+        if (v instanceof String) {
+            try { return Integer.parseInt((String) v); } catch (NumberFormatException ignored) {}
+        }
+        return 0;
+    }
 
     /** JSONObject/JSONArray → StandardMessageCodec 可序列化的 Map/List（递归）。 */
     static Object toCodecSafe(Object v) {

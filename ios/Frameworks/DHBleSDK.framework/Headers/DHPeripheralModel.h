@@ -22,6 +22,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic,strong) NSString *name;
 /// 信号强度（0-255 数值越小距离越近）
 @property (nonatomic,assign) NSInteger rssi;
+/// 设备型号(从广播包解析)
+@property (nonatomic,strong) NSString *deviceModel;
 
 @end
 

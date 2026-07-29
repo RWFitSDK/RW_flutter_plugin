@@ -85,6 +85,7 @@ typedef enum : UInt8 {
     BLE_KEY_FLAG_READ_CONTINUE = 0x11,
     BLE_KEY_FLAG_CREATE = 0x20, //增操作，指令版本0
     BLE_KEY_FLAG_DELETE = 0x30, //删操作，指令版本0
+    BLE_KEY_FLAG_PUSH = 0x40, //设备主动PUSH,APP不需要回复
     BLE_KEY_FLAG_NONE
 } BleKeyFlag;
 
@@ -198,11 +199,14 @@ typedef enum : UInt16 {
      BLE_KEY_SET_SPO2_ALERT = 0x027a,//用户可以自由设置报警数值, 开关+数值
      BLE_KEY_APP_REAL_ALERT = 0x027b, //超出数值实时提醒, 类型(0HR,1SP02) + 测出的值
      BLE_KEY_BLOOD_PRESSURE_MONITORING = 0x027C,
-     BLE_KEY_TEMPERATURE_MONITORING = 0x027D,
+     BLE_KEY_GESTURE_FALL_DETECT = 0x027D, // 设置开启或关闭跌落提醒
+     BLE_KEY_PPG_MONITORING = 0x027E,       // PPG定时监测
      BLE_KEY_MUSLIM_TIME_DISPLAY_MODE = 0x027F, //Muslim 固件增加时间可选项 1：每次唤醒都先显示时间，再进入计数模式，2：时间永不显示， 3:戒指休眠10分钟后，再次唤醒时显示时间。默认3
      BLE_KEY_MUSLIM_COUNT_RESET_MODE = 0x0280, //Muslim 戒指清零方式 0:保持现状(默认) 1:允许戒指长按清零
      BLE_KEY_GET_RESTING_HEALTH_DATA = 0x0281, //静息数据获取(心率,HRV,血氧)
      BLE_KEY_ALARM_VIBRATION_DURATION = 0x0282,// 闹钟震动时长设置
+     BLE_KEY_VIBRATION_INTERVAL = 0x0283,   // 震动间隔时长设置
+     BLE_KEY_COUNT_REMINDER_INTERVAL = 0x0284, // 计数提醒间隔设置
     
      REALTIME_LOG = 0x02F9,
      BLE_KEY_GSENSOR_OUTPUT = 0x02FA, // 1: 开启GSensor输出；2: 关闭GSensor输出
@@ -279,6 +283,9 @@ typedef enum : UInt16 {
      BLE_KEY_APP_CONTROL_COUNT = 0x0610,//APP控制戒指在线进入念珠模式, 2字节目标值+2字节初始值(小端)
      BLE_KEY_COUPLE_INTERACTION = 0x0611, //情侣功能互动
      BLE_KEY_APP_FOREGROUND_BACKGROUND = 0x0612, //app进前后台 1 前台 2后台; 实时更新步数等需要.
+
+     // TEST
+     BLE_KEY_FACTORYTEST = 0x0A0A, // 工厂测试与校正
 
      // IO
      BLE_KEY_WATCH_FACE = 0x0701,

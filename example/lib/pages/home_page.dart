@@ -13,6 +13,7 @@ import 'sync_page.dart';
 import 'ota_page.dart';
 import 'notify_page.dart';
 import 'scan_page.dart';
+import 'workout_page.dart';
 
 /// 功能主页 / 落地页（对标 index.vue）：连接管理 + 各功能子页入口。
 ///
@@ -29,6 +30,7 @@ class _HomePageState extends State<HomePage> {
   final _ring = RwfitBle.instance;
   final _subs = <StreamSubscription>[];
   bool _ready = false;
+  bool _supportsWorkout = false;
   String _conn = '未连接';
   BleDevice? _saved;
 
@@ -40,7 +42,10 @@ class _HomePageState extends State<HomePage> {
         setState(() => _conn = e.state.name);
         if (e.state == ConnectState.disconnected ||
             e.state == ConnectState.failed) {
-          setState(() => _ready = false);
+          setState(() {
+            _ready = false;
+            _supportsWorkout = false;
+          });
         }
       }),
     );
@@ -48,6 +53,7 @@ class _HomePageState extends State<HomePage> {
       _ring.onFunctionMenu.listen((menu) async {
         setState(() {
           _ready = true;
+          _supportsWorkout = menu.supportsWorkout;
           _conn = 'connected';
         });
         // 连接就绪 → 持久化当前设备供下次重连；iOS 置绑定态以启用内置重连。
@@ -184,6 +190,13 @@ class _HomePageState extends State<HomePage> {
                   () => _push(const SyncPage()),
                 ),
                 _tile(
+                  '多运动',
+                  _supportsWorkout ? '运动类型选择 / 实时运动控制与数据' : '当前设备不支持多运动',
+                  Icons.directions_run,
+                  () => _push(const WorkoutPage()),
+                  enabled: _ready && _supportsWorkout,
+                ),
+                _tile(
                   'OTA 升级',
                   '固件升级',
                   Icons.system_update,
@@ -247,14 +260,21 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _tile(String title, String sub, IconData icon, VoidCallback onTap) {
+  Widget _tile(
+    String title,
+    String sub,
+    IconData icon,
+    VoidCallback onTap, {
+    bool? enabled,
+  }) {
+    final isEnabled = enabled ?? _ready;
     return ListTile(
       leading: Icon(icon),
       title: Text(title),
       subtitle: Text(sub),
       trailing: const Icon(Icons.chevron_right),
-      enabled: _ready,
-      onTap: _ready ? onTap : null,
+      enabled: isEnabled,
+      onTap: isEnabled ? onTap : null,
     );
   }
 }

@@ -145,7 +145,7 @@ public class RWFitCallbackManager implements ScanDeviceCallback,
             menu.put("isBloodSugar", supportMenuBean.isBloodSugar());
             menu.put("isHrv", supportMenuBean.isHrv());
             menu.put("isPressure", supportMenuBean.isPressure());
-            menu.put("isBodyTemp", supportMenuBean.isBodyTemp());
+            menu.put("isBodyTemp", supportMenuBean.isDataTypeTemperature());
             menu.put("isAlarm", supportMenuBean.isAlarm());
             menu.put("isBrightScreenTime", supportMenuBean.isBrightScreenTime());
             menu.put("isBrightScreenSleepTime", supportMenuBean.isBrightScreenSleepTime());
@@ -156,6 +156,7 @@ public class RWFitCallbackManager implements ScanDeviceCallback,
             menu.put("isSupportAlarmVibrationDuration", supportMenuBean.isSupportAlarmVibrationDuration());
             menu.put("isMuslimCountData", supportMenuBean.isMuslimCountData());
             menu.put("isSupportMuslimTimeDisplayMode", supportMenuBean.isSupportMuslimTimeDisplayMode());
+            menu.put("isSupportWorkout", supportMenuBean.isNewSport());
             data.put("supportMenu", menu);
         }
         // 连接就绪后自动启用音乐控制订阅 (Android 专用，幂等)

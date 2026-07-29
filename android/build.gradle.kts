@@ -1,5 +1,5 @@
 group = "com.rwfit.rwfit_ble"
-version = "1.0-SNAPSHOT"
+version = "0.0.2"
 
 buildscript {
     repositories {
@@ -46,7 +46,7 @@ android {
 
 dependencies {
     // RW 戒指原生 SDK（通过本地 maven repo 引用）
-    implementation("com.rwfit:blesdk-rwfit:1.0")
+    implementation("com.rwfit:blesdk-rwfit:2.260724")
     // FastJSON：现有桥接层用它构造 SDK 入参/出参，移植保留
     implementation("com.alibaba:fastjson:1.2.83")
 }

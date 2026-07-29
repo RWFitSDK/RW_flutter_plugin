@@ -134,6 +134,37 @@ class RwfitBle {
   Stream<RealtimeData> get onRealtimeData =>
       onEvent(RwfitEvents.healthData).map(RealtimeData.fromMap);
 
+  // ==================== 多运动 ====================
+
+  /// 查询设备当前运动类型和控制状态。开始新运动前应先调用。
+  Future<WorkoutState> getWorkoutState() async =>
+      WorkoutState.fromMap(await callAsync('getWorkoutState'));
+
+  /// 开始/继续/暂停/结束多运动。两端统一只返回成功或失败。
+  Future<void> controlWorkout(int sportType, WorkoutControlType controlType) {
+    if (controlType == WorkoutControlType.unknown) {
+      throw ArgumentError.value(controlType, 'controlType', '不能发送 unknown');
+    }
+    return callAsync('controlWorkout', {
+      'sportType': sportType,
+      'controlType': controlType.value,
+    });
+  }
+
+  /// 开启或关闭设备实时运动数据通知。
+  Future<void> setWorkoutRealtimeEnabled(bool enabled) =>
+      callAsync('setWorkoutRealtimeEnabled', {'enabled': enabled});
+
+  Stream<WorkoutRealtimeData> get onWorkoutRealtimeData =>
+      onEvent(RwfitEvents.workoutRealtimeData).map(WorkoutRealtimeData.fromMap);
+
+  /// 同步设备保存的多运动报告。
+  Future<List<WorkoutReport>> getWorkoutReports() async {
+    final data =
+        (await callAsync('getWorkoutReports'))['data'] as List? ?? const [];
+    return data.map((item) => WorkoutReport.fromMap(item as Map)).toList();
+  }
+
   // ==================== 设备控制 ====================
 
   Future<void> findDevice() => callAsync('controlFindDevice');
