@@ -6,6 +6,8 @@ library;
 
 import 'rwfit_constants.dart';
 
+const Object _notProvided = Object();
+
 /// 蓝牙设备。`uuid` 仅 iOS 有且为设备主标识——连接时必须整条回传。
 class BleDevice {
   const BleDevice({
@@ -36,6 +38,9 @@ class BleDevice {
 }
 
 /// 连接状态事件。`uuid` 仅 iOS；`reason` 仅 failed。
+///
+/// Android 的 `reason` 是原生错误枚举名；iOS 原生失败回调不含错误参数，
+/// 因此固定为 `unknown`。
 class ConnectStateEvent {
   const ConnectStateEvent({
     required this.state,
@@ -62,6 +67,7 @@ class ConnectStateEvent {
 }
 
 /// 设备功能配置表就绪事件。`raw` 是 supportMenu 原始能力表，App 自行读位做灰显/隐藏。
+///
 class FunctionMenu {
   const FunctionMenu({
     required this.name,
@@ -107,26 +113,40 @@ class WorkoutState {
   };
 }
 
-/// 实时健康数据。`timestampMs` 为毫秒（桥接层已归一化，见开发文档 §3.4 单位陷阱）。
+/// 实时健康数据。原生桥接统一传 Unix 秒，对外规范字段为 [timestampSec]。
 class RealtimeData {
+  /// 兼容旧代码使用毫秒构造；新代码应使用 [RealtimeData.fromSeconds]。
+  @Deprecated('Use RealtimeData.fromSeconds instead.')
   const RealtimeData({
     this.type,
     required this.value,
     this.diastolic,
-    required this.timestampMs,
+    required int timestampMs,
+  }) : timestampSec = timestampMs ~/ 1000;
+
+  const RealtimeData.fromSeconds({
+    this.type,
+    required this.value,
+    this.diastolic,
+    required this.timestampSec,
   });
 
   final HealthType? type;
-  final int value;
+  final double value;
   final int? diastolic; // 仅血压
-  final int timestampMs;
+  final int timestampSec;
 
-  factory RealtimeData.fromMap(Map<dynamic, dynamic> m) => RealtimeData(
-    type: HealthType.fromValue((m['dataType'] as num).toInt()),
-    value: (m['dataValue'] as num).toInt(),
-    diastolic: (m['diastolic'] as num?)?.toInt(),
-    timestampMs: (m['time'] as num).toInt(),
-  );
+  /// 旧版毫秒字段的兼容访问；新代码请使用 [timestampSec]。
+  @Deprecated('Use timestampSec instead.')
+  int get timestampMs => timestampSec * 1000;
+
+  factory RealtimeData.fromMap(Map<dynamic, dynamic> m) =>
+      RealtimeData.fromSeconds(
+        type: HealthType.fromValue((m['dataType'] as num).toInt()),
+        value: (m['dataValue'] as num).toDouble(),
+        diastolic: (m['diastolic'] as num?)?.toInt(),
+        timestampSec: (m['time'] as num).toInt(),
+      );
 }
 
 /// 多运动中的实时统计。
@@ -308,6 +328,222 @@ class TouchEvent {
   );
 }
 
+/// 设备发起的来电控制事件。
+class CallControlEvent {
+  const CallControlEvent({required this.action, required this.rawValue});
+
+  final CallControlAction? action;
+  final int rawValue;
+
+  factory CallControlEvent.fromMap(Map<dynamic, dynamic> m) => CallControlEvent(
+    action: CallControlAction.parse(m['action'] as String?),
+    rawValue: (m['rawValue'] as num?)?.toInt() ?? -1,
+  );
+}
+
+/// 心率报警配置。
+class HeartRateAlertConfig {
+  const HeartRateAlertConfig({
+    required this.isOpen,
+    required this.highThreshold,
+    this.lowThreshold,
+  });
+
+  final bool isOpen;
+  final int highThreshold;
+
+  /// 低心率阈值；null 表示设备不支持低心率报警。
+  final int? lowThreshold;
+
+  factory HeartRateAlertConfig.fromMap(Map<dynamic, dynamic> m) =>
+      HeartRateAlertConfig(
+        isOpen: m['isOpen'] as bool? ?? false,
+        highThreshold: (m['highThreshold'] as num?)?.toInt() ?? 160,
+        lowThreshold: (m['lowThreshold'] as num?)?.toInt(),
+      );
+
+  Map<String, dynamic> toMap() => {
+    'isOpen': isOpen,
+    'highThreshold': highThreshold,
+    'lowThreshold': lowThreshold,
+  };
+
+  HeartRateAlertConfig copyWith({
+    bool? isOpen,
+    int? highThreshold,
+    Object? lowThreshold = _notProvided,
+  }) => HeartRateAlertConfig(
+    isOpen: isOpen ?? this.isOpen,
+    highThreshold: highThreshold ?? this.highThreshold,
+    lowThreshold: identical(lowThreshold, _notProvided)
+        ? this.lowThreshold
+        : lowThreshold as int?,
+  );
+}
+
+/// 血氧过低报警配置。
+class BloodOxygenAlertConfig {
+  const BloodOxygenAlertConfig({
+    required this.isOpen,
+    required this.lowThreshold,
+  });
+
+  final bool isOpen;
+  final int lowThreshold;
+
+  factory BloodOxygenAlertConfig.fromMap(Map<dynamic, dynamic> m) =>
+      BloodOxygenAlertConfig(
+        isOpen: m['isOpen'] as bool? ?? false,
+        // 双端协议默认阈值为 94%；Android Bean 的 95 初始值会被设备读取结果覆盖。
+        lowThreshold: (m['lowThreshold'] as num?)?.toInt() ?? 94,
+      );
+
+  Map<String, dynamic> toMap() => {
+    'isOpen': isOpen,
+    'lowThreshold': lowThreshold,
+  };
+
+  BloodOxygenAlertConfig copyWith({bool? isOpen, int? lowThreshold}) =>
+      BloodOxygenAlertConfig(
+        isOpen: isOpen ?? this.isOpen,
+        lowThreshold: lowThreshold ?? this.lowThreshold,
+      );
+}
+
+/// 设备主动上报的心率/血氧报警。
+class HealthAlertEvent {
+  const HealthAlertEvent({
+    required this.type,
+    required this.rawType,
+    required this.value,
+  });
+
+  final HealthAlertType type;
+  final int rawType;
+  final int value;
+
+  factory HealthAlertEvent.fromMap(Map<dynamic, dynamic> m) {
+    final rawType = (m['type'] as num?)?.toInt() ?? -1;
+    return HealthAlertEvent(
+      type: HealthAlertType.fromValue(rawType),
+      rawType: rawType,
+      value: (m['value'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
+/// 心率校正过程事件。设备通常先上报 result=0，再上报非 0 的最终结果。
+class HeartRateCalibrationResult {
+  const HeartRateCalibrationResult({
+    required this.testMode,
+    required this.result,
+  });
+
+  final int testMode;
+  final int result;
+
+  bool get isCalibrating => result == 0;
+  bool get isCompleted => result != 0;
+
+  factory HeartRateCalibrationResult.fromMap(Map<dynamic, dynamic> m) =>
+      HeartRateCalibrationResult(
+        testMode: (m['testMode'] as num?)?.toInt() ?? 0,
+        result: (m['result'] as num?)?.toInt() ?? 0,
+      );
+}
+
+/// ACC 三轴原始采样值。
+class AccRawSample {
+  const AccRawSample({required this.x, required this.y, required this.z});
+
+  final int x;
+  final int y;
+  final int z;
+
+  factory AccRawSample.fromMap(Map<dynamic, dynamic> m) => AccRawSample(
+    x: (m['x'] as num?)?.toInt() ?? 0,
+    y: (m['y'] as num?)?.toInt() ?? 0,
+    z: (m['z'] as num?)?.toInt() ?? 0,
+  );
+}
+
+/// 睡眠状态原始采样值。
+class SleepRawSample {
+  const SleepRawSample({required this.timestampSec, required this.mode});
+
+  final int timestampSec;
+  final int mode;
+
+  factory SleepRawSample.fromMap(Map<dynamic, dynamic> m) => SleepRawSample(
+    timestampSec: (m['timestampSec'] as num?)?.toInt() ?? 0,
+    mode: (m['mode'] as num?)?.toInt() ?? 0,
+  );
+}
+
+/// 传感器原始数据包；实时通知与历史同步使用同一结构。
+class SensorRawPacket {
+  const SensorRawPacket({
+    required this.type,
+    required this.rawType,
+    this.sequence,
+    this.timestampSec,
+    this.ppg = const [],
+    this.acc = const [],
+    this.ppgRed = const [],
+    this.ir = const [],
+    this.sleep = const [],
+  });
+
+  final SensorRawDataType type;
+  final int rawType;
+  final int? sequence;
+  final int? timestampSec;
+  final List<int> ppg;
+  final List<AccRawSample> acc;
+  final List<int> ppgRed;
+  final List<int> ir;
+  final List<SleepRawSample> sleep;
+
+  factory SensorRawPacket.fromMap(Map<dynamic, dynamic> m) {
+    final rawType = (m['type'] as num?)?.toInt() ?? -1;
+    return SensorRawPacket(
+      type: SensorRawDataType.fromValue(rawType),
+      rawType: rawType,
+      sequence: (m['sequence'] as num?)?.toInt(),
+      timestampSec: (m['timestampSec'] as num?)?.toInt(),
+      ppg:
+          (m['ppg'] as List?)?.map((v) => (v as num).toInt()).toList() ??
+          const [],
+      acc:
+          (m['acc'] as List?)
+              ?.map((v) => AccRawSample.fromMap(v as Map))
+              .toList() ??
+          const [],
+      ppgRed:
+          (m['ppgRed'] as List?)?.map((v) => (v as num).toInt()).toList() ??
+          const [],
+      ir:
+          (m['ir'] as List?)?.map((v) => (v as num).toInt()).toList() ??
+          const [],
+      sleep:
+          (m['sleep'] as List?)
+              ?.map((v) => SleepRawSample.fromMap(v as Map))
+              .toList() ??
+          const [],
+    );
+  }
+}
+
+/// 设备主动停止传感器采集事件；0 表示原生层未提供具体原因。
+class SensorRawStoppedEvent {
+  const SensorRawStoppedEvent({required this.reason});
+
+  final int reason;
+
+  factory SensorRawStoppedEvent.fromMap(Map<dynamic, dynamic> m) =>
+      SensorRawStoppedEvent(reason: (m['reason'] as num?)?.toInt() ?? 0);
+}
+
 /// OTA 结束：成功 payload {}、失败 {code}。
 class OtaResult {
   const OtaResult({required this.success, this.code});
@@ -362,14 +598,13 @@ class UserInfo {
   };
 }
 
-/// 闹钟项（字段对齐原生，含 repeats 周开关）。
+/// 闹钟项。设备协议仅使用 ID、时间、开关和重复星期。
 class Alarm {
   const Alarm({
     required this.alarmId,
     required this.startHour,
     required this.startMin,
     required this.isOpen,
-    this.alarmTag = '',
     this.repeats = const [0, 0, 0, 0, 0, 0, 0],
   });
 
@@ -377,15 +612,13 @@ class Alarm {
   final int startHour;
   final int startMin;
   final bool isOpen;
-  final String alarmTag;
-  final List<int> repeats; // 长度 7：周一~周日
+  final List<int> repeats; // 长度 7：周日~周六（index 0=周日）
 
   factory Alarm.fromMap(Map<dynamic, dynamic> m) => Alarm(
     alarmId: (m['alarmId'] as num).toInt(),
     startHour: (m['startHour'] as num).toInt(),
     startMin: (m['startMin'] as num).toInt(),
     isOpen: m['isOpen'] == true,
-    alarmTag: (m['alarmTag'] ?? '') as String,
     repeats:
         (m['repeats'] as List?)?.map((e) => (e as num).toInt()).toList() ??
         const [0, 0, 0, 0, 0, 0, 0],
@@ -396,7 +629,6 @@ class Alarm {
     'startHour': startHour,
     'startMin': startMin,
     'isOpen': isOpen,
-    'alarmTag': alarmTag,
     'repeats': repeats,
   };
 
@@ -406,19 +638,17 @@ class Alarm {
     int? startHour,
     int? startMin,
     bool? isOpen,
-    String? alarmTag,
     List<int>? repeats,
   }) => Alarm(
     alarmId: alarmId ?? this.alarmId,
     startHour: startHour ?? this.startHour,
     startMin: startMin ?? this.startMin,
     isOpen: isOpen ?? this.isOpen,
-    alarmTag: alarmTag ?? this.alarmTag,
     repeats: repeats ?? this.repeats,
   );
 }
 
-/// 全天检测配置（6 项共用：心率/血氧/HRV/压力/血糖/血压）。
+/// 7 项全天健康检测与 PPG 定时监测共用的配置。
 class TimedConfig {
   const TimedConfig({
     required this.isOpen,

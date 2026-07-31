@@ -48,10 +48,10 @@ Stream<Map<String, dynamic>> onEvent(String eventName) =>
 abstract final class RwfitEvents {
   static const scanResult = 'rwfit:scanResult';
   static const scanFinish = 'rwfit:scanFinish';
-  static const scanError = 'rwfit:scanError';
   static const connectState = 'rwfit:connectState';
   static const functionMenu = 'rwfit:functionMenu';
   static const healthData = 'rwfit:healthData';
+  static const realtimeMeasureComplete = 'rwfit:realtimeMeasureComplete';
   static const workoutRealtimeData = 'rwfit:workoutRealtimeData';
   static const syncProgress = 'rwfit:syncProgress';
   static const syncResult = 'rwfit:syncResult';
@@ -60,4 +60,9 @@ abstract final class RwfitEvents {
   static const otaProgress = 'rwfit:otaProgress';
   static const otaFinish = 'rwfit:otaFinish';
   static const touchEvent = 'rwfit:touchEvent';
+  static const callControl = 'rwfit:callControl';
+  static const healthAlert = 'rwfit:healthAlert';
+  static const heartRateCalibration = 'rwfit:heartRateCalibration';
+  static const sensorRawData = 'rwfit:sensorRawData';
+  static const sensorRawStopped = 'rwfit:sensorRawStopped';
 }

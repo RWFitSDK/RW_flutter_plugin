@@ -84,11 +84,7 @@ public class RWFitCallbackManager implements ScanDeviceCallback,
 
     @Override
     public void onError(int errorCode, Exception e) {
-        Log.e(TAG, "onScanError: code=" + errorCode);
-        JSONObject data = new JSONObject();
-        data.put("code", errorCode);
-        data.put("msg", e != null ? e.getMessage() : "scan error");
-        fireEvent("rwfit:scanError", data);
+        Log.e(TAG, "scan failed: code=" + errorCode);
     }
 
     // ==================== RingConnectBleCallback ====================
@@ -136,28 +132,7 @@ public class RWFitCallbackManager implements ScanDeviceCallback,
             data.put("mac", device.getBleMac());
         }
         if (supportMenuBean != null) {
-            JSONObject menu = new JSONObject();
-            menu.put("isStep", supportMenuBean.isStep());
-            menu.put("isSleep", supportMenuBean.isSleep());
-            menu.put("isHr", supportMenuBean.isHr());
-            menu.put("isBloodOxy", supportMenuBean.isBloodOxy());
-            menu.put("isBloodPress", supportMenuBean.isBloodPress());
-            menu.put("isBloodSugar", supportMenuBean.isBloodSugar());
-            menu.put("isHrv", supportMenuBean.isHrv());
-            menu.put("isPressure", supportMenuBean.isPressure());
-            menu.put("isBodyTemp", supportMenuBean.isDataTypeTemperature());
-            menu.put("isAlarm", supportMenuBean.isAlarm());
-            menu.put("isBrightScreenTime", supportMenuBean.isBrightScreenTime());
-            menu.put("isBrightScreenSleepTime", supportMenuBean.isBrightScreenSleepTime());
-            menu.put("isPushMsgEnableSwitch", supportMenuBean.isPushMsgEnableSwitch());
-            menu.put("isFindDevice", supportMenuBean.isFindDevice());
-            menu.put("isTakePhoto", supportMenuBean.isTakePhoto());
-            menu.put("isSupportMotoVibrationLevel", supportMenuBean.isSupportMotoVibrationLevel());
-            menu.put("isSupportAlarmVibrationDuration", supportMenuBean.isSupportAlarmVibrationDuration());
-            menu.put("isMuslimCountData", supportMenuBean.isMuslimCountData());
-            menu.put("isSupportMuslimTimeDisplayMode", supportMenuBean.isSupportMuslimTimeDisplayMode());
-            menu.put("isSupportWorkout", supportMenuBean.isNewSport());
-            data.put("supportMenu", menu);
+            data.put("supportMenu", RwfitBlePlugin.supportMenuMap(supportMenuBean));
         }
         // 连接就绪后自动启用音乐控制订阅 (Android 专用，幂等)
         if (plugin != null) {
@@ -170,8 +145,11 @@ public class RWFitCallbackManager implements ScanDeviceCallback,
 
     @Override
     public void onSyncProgress(int progress) {
+        // Android 当前只在完成时回调 100。过滤潜在的中间值，保持 Flutter
+        // 契约为跨平台一致的“同步完成标记”，而不是不可比较的原生进度。
+        if (progress < 100) return;
         JSONObject data = new JSONObject();
-        data.put("progress", progress);
+        data.put("progress", 100);
         fireEvent("rwfit:syncProgress", data);
     }
 
@@ -197,11 +175,13 @@ public class RWFitCallbackManager implements ScanDeviceCallback,
                 day.put("totalSteps", bean.getTotalSteps());
                 day.put("totalCalorie", bean.getTotalCalorie());
                 day.put("totalDistance", bean.getTotalDistance());
+                day.put("activityDataInterval", bean.getActivityDataInterval());
                 JSONArray items = new JSONArray();
                 if (bean.getItems() != null) {
                     for (StepItemBean it : bean.getItems()) {
                         if (it == null) continue;
                         JSONObject item = new JSONObject();
+                        item.put("time", it.getTimestamp());
                         item.put("index", it.getIndex());
                         item.put("steps", it.getSteps());
                         item.put("calorie", it.getCalorie());
@@ -372,7 +352,7 @@ public class RWFitCallbackManager implements ScanDeviceCallback,
                     for (BloodSugarItemBean it : bean.getItems()) {
                         if (it == null) continue;
                         JSONObject item = buildItem(it.getTimeMills());
-                        // raw 值为血糖 ×10 (float)，App 端 ÷10 还原为 mmol/L
+                        // Android SDK 历史解析已除以 10，直接透传实际血糖值。
                         item.put("bloodSugar", it.getSugar());
                         items.add(item);
                     }

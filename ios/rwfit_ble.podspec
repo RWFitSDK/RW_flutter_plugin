@@ -4,7 +4,7 @@
 #
 Pod::Spec.new do |s|
   s.name             = 'rwfit_ble'
-  s.version          = '0.0.2'
+  s.version          = '0.0.3'
   s.summary          = 'RWFIT 智能戒指 BLE Flutter 插件'
   s.description      = '桥接 RW 原生 DHBleSDK，提供扫描/连接/健康监测/设备控制/数据同步/OTA 能力。'
   s.homepage         = 'https://github.com/RWFitSDK/RW_flutter_plugin'

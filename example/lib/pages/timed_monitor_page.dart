@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:rwfit_ble/rwfit_ble.dart';
 
+import '../support_menu.dart';
 import '../widgets/result_tile.dart';
 
-/// 全天检测页：6 项（心率/血氧/HRV/压力/血糖/血压）get/set 演示。
+/// 定时监测页：7 项全天健康检测 + PPG 配置 get/set 演示。
 class TimedMonitorPage extends StatefulWidget {
-  const TimedMonitorPage({super.key});
+  const TimedMonitorPage({super.key, required this.capabilities});
+
+  final DemoCapabilities capabilities;
 
   @override
   State<TimedMonitorPage> createState() => _TimedMonitorPageState();
@@ -30,15 +33,19 @@ class _TimedMonitorPageState extends State<TimedMonitorPage> {
     }
   }
 
-  Future<void> _set(String label, Future<void> Function(TimedConfig) fn) async {
-    // 示例：开启，每 30 分钟检测一次，8:00-22:00
-    final config = const TimedConfig(
+  Future<void> _set(
+    String label,
+    int duration,
+    Future<void> Function(TimedConfig) fn,
+  ) async {
+    // 协议时间范围固定全天；检测间隔由各功能支持范围决定。
+    final config = TimedConfig(
       isOpen: true,
-      duration: 30,
-      startHour: 8,
+      duration: duration,
+      startHour: 0,
       startMin: 0,
-      endHour: 22,
-      endMin: 0,
+      endHour: 23,
+      endMin: 59,
     );
     try {
       await fn(config);
@@ -63,23 +70,75 @@ class _TimedMonitorPageState extends State<TimedMonitorPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _row('心率', _ring.getTimedHeartRate, _ring.setTimedHeartRate),
+                  _row(
+                    '心率',
+                    _ring.getTimedHeartRate,
+                    _ring.setTimedHeartRate,
+                    duration: 30,
+                    enabled: widget.capabilities.has(
+                      DemoCapabilityKey.heartRate,
+                    ),
+                  ),
                   _row(
                     '血氧',
                     _ring.getTimedBloodOxygen,
                     _ring.setTimedBloodOxygen,
+                    duration: 60,
+                    enabled: widget.capabilities.has(
+                      DemoCapabilityKey.bloodOxygen,
+                    ),
                   ),
-                  _row('HRV', _ring.getTimedHRV, _ring.setTimedHRV),
-                  _row('压力', _ring.getTimedStress, _ring.setTimedStress),
+                  _row(
+                    'HRV',
+                    _ring.getTimedHRV,
+                    _ring.setTimedHRV,
+                    duration: 60,
+                    enabled: widget.capabilities.has(DemoCapabilityKey.hrv),
+                  ),
+                  _row(
+                    '压力',
+                    _ring.getTimedStress,
+                    _ring.setTimedStress,
+                    duration: 60,
+                    enabled: widget.capabilities.has(
+                      DemoCapabilityKey.pressure,
+                    ),
+                  ),
                   _row(
                     '血糖',
                     _ring.getTimedBloodSugar,
                     _ring.setTimedBloodSugar,
+                    duration: 60,
+                    enabled: widget.capabilities.has(
+                      DemoCapabilityKey.bloodSugar,
+                    ),
                   ),
                   _row(
                     '血压',
                     _ring.getTimedBloodPressure,
                     _ring.setTimedBloodPressure,
+                    duration: 60,
+                    enabled: widget.capabilities.has(
+                      DemoCapabilityKey.bloodPressure,
+                    ),
+                  ),
+                  _row(
+                    '体温',
+                    _ring.getTimedBodyTemperature,
+                    _ring.setTimedBodyTemperature,
+                    duration: 30,
+                    enabled: widget.capabilities.has(
+                      DemoCapabilityKey.temperatureMonitoring,
+                    ),
+                  ),
+                  _row(
+                    'PPG',
+                    _ring.getTimedPPG,
+                    _ring.setTimedPPG,
+                    duration: 30,
+                    enabled: widget.capabilities.has(
+                      DemoCapabilityKey.ppgMonitoring,
+                    ),
                   ),
                 ],
               ),
@@ -95,8 +154,10 @@ class _TimedMonitorPageState extends State<TimedMonitorPage> {
   Widget _row(
     String label,
     Future<TimedConfig> Function() getter,
-    Future<void> Function(TimedConfig) setter,
-  ) {
+    Future<void> Function(TimedConfig) setter, {
+    required int duration,
+    required bool enabled,
+  }) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
@@ -104,14 +165,23 @@ class _TimedMonitorPageState extends State<TimedMonitorPage> {
           SizedBox(width: 48, child: Text(label)),
           const SizedBox(width: 8),
           FilledButton.tonal(
-            onPressed: () => _get('获取$label', getter),
+            onPressed: enabled ? () => _get('获取$label', getter) : null,
             child: const Text('获取'),
           ),
           const SizedBox(width: 8),
           FilledButton.tonal(
-            onPressed: () => _set('设置$label', setter),
+            onPressed: enabled
+                ? () => _set('设置$label', duration, setter)
+                : null,
             child: const Text('设置'),
           ),
+          if (!enabled) ...[
+            const SizedBox(width: 8),
+            const Text(
+              '不支持',
+              style: TextStyle(color: Colors.grey, fontSize: 12),
+            ),
+          ],
         ],
       ),
     );

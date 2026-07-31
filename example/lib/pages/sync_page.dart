@@ -3,11 +3,14 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:rwfit_ble/rwfit_ble.dart';
 
+import '../support_menu.dart';
 import '../widgets/result_tile.dart';
 
-/// 数据同步页：演示 syncAllHealthData + 进度/结果/完成事件监听。
+/// 数据同步页：演示 syncAllHealthData + 完成标记/结果/完成事件监听。
 class SyncPage extends StatefulWidget {
-  const SyncPage({super.key});
+  const SyncPage({super.key, required this.capabilities});
+
+  final DemoCapabilities capabilities;
 
   @override
   State<SyncPage> createState() => _SyncPageState();
@@ -81,13 +84,24 @@ class _SyncPageState extends State<SyncPage> {
             padding: const EdgeInsets.all(16),
             child: Column(
               children: [
-                LinearProgressIndicator(value: _progress / 100),
+                LinearProgressIndicator(
+                  value: _syncing ? null : (_progress == 100 ? 1 : 0),
+                ),
                 const SizedBox(height: 8),
-                Text('进度: ${_progress.toStringAsFixed(0)}%'),
+                Text(
+                  _syncing ? '同步中...' : (_progress == 100 ? '同步完成' : '尚未同步'),
+                ),
                 const SizedBox(height: 16),
                 FilledButton(
-                  onPressed: _syncing ? null : _startSync,
-                  child: Text(_syncing ? '同步中...' : '开始同步'),
+                  onPressed:
+                      _syncing || !widget.capabilities.supportsAnyHealthData
+                      ? null
+                      : _startSync,
+                  child: Text(
+                    !widget.capabilities.supportsAnyHealthData
+                        ? '当前设备无可同步数据'
+                        : (_syncing ? '同步中...' : '开始同步'),
+                  ),
                 ),
               ],
             ),

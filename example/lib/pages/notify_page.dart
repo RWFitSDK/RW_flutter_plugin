@@ -3,13 +3,16 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:rwfit_ble/rwfit_ble.dart';
 
+import '../support_menu.dart';
 import '../widgets/result_tile.dart';
 
 /// 消息推送 / 通知开关页：
 /// - Android: pushMessage（APP 主动推消息到设备）
 /// - iOS: setNotificationSwitch / getNotificationSwitch（ANCS 转发开关）
 class NotifyPage extends StatefulWidget {
-  const NotifyPage({super.key});
+  const NotifyPage({super.key, required this.capabilities});
+
+  final DemoCapabilities capabilities;
 
   @override
   State<NotifyPage> createState() => _NotifyPageState();
@@ -73,6 +76,11 @@ class _NotifyPageState extends State<NotifyPage> {
   @override
   Widget build(BuildContext context) {
     final isAndroid = Platform.isAndroid;
+    final supported = widget.capabilities.has(
+      isAndroid
+          ? DemoCapabilityKey.pushMessage
+          : DemoCapabilityKey.pushMessageSwitch,
+    );
     return Scaffold(
       appBar: AppBar(title: const Text('消息/通知')),
       body: Column(
@@ -100,35 +108,19 @@ class _NotifyPageState extends State<NotifyPage> {
                   children: [
                     if (isAndroid)
                       FilledButton.tonal(
-                        onPressed: _pushMessage,
-                        child: const Text('推送测试消息'),
+                        onPressed: supported ? _pushMessage : null,
+                        child: Text(supported ? '推送测试消息' : '推送测试消息(不支持)'),
                       ),
                     if (!isAndroid) ...[
                       FilledButton.tonal(
-                        onPressed: _getSwitch,
-                        child: const Text('获取通知开关'),
+                        onPressed: supported ? _getSwitch : null,
+                        child: Text(supported ? '获取通知开关' : '获取通知开关(不支持)'),
                       ),
                       FilledButton.tonal(
-                        onPressed: _setSwitch,
+                        onPressed: supported ? _setSwitch : null,
                         child: const Text('设置通知开关'),
                       ),
                     ],
-                    // 两端都可调用对方的方法（no-op 返回成功），演示不会报错
-                    FilledButton.tonal(
-                      onPressed: () => _run(
-                        '跨平台调用(no-op)',
-                        isAndroid
-                            ? () => _ring.getNotificationSwitch()
-                            : () => _ring.pushMessage({
-                                'appId': 'test',
-                                'title': 'test',
-                                'content': 'test',
-                              }),
-                      ),
-                      child: Text(
-                        isAndroid ? 'iOS方法(no-op)' : 'Android方法(no-op)',
-                      ),
-                    ),
                   ],
                 ),
               ],

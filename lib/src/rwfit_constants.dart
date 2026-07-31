@@ -100,8 +100,81 @@ enum TouchAction {
   musicNext,
   musicVolumeUp,
   musicVolumeDown,
+  singleTap,
+  doubleTap,
+  tripleTap,
+  longPress,
+  swing,
+  fallDetected,
   unknown;
 
   static TouchAction parse(String? s) =>
       values.firstWhere((e) => e.name == s, orElse: () => TouchAction.unknown);
+}
+
+/// 来电控制动作。当前仅 Android 原生 SDK 暴露此能力。
+enum CallControlAction {
+  answer(0),
+  reject(1);
+
+  const CallControlAction(this.commandValue);
+  final int commandValue;
+
+  static CallControlAction? parse(String? value) {
+    for (final action in values) {
+      if (action.name == value) return action;
+    }
+    return null;
+  }
+}
+
+/// 设备健康报警类型。
+enum HealthAlertType {
+  highHeartRate(0),
+  lowBloodOxygen(1),
+  lowHeartRate(2),
+  unknown(-1);
+
+  const HealthAlertType(this.value);
+  final int value;
+
+  static HealthAlertType fromValue(int value) => values.firstWhere(
+    (item) => item.value == value,
+    orElse: () => HealthAlertType.unknown,
+  );
+}
+
+/// 传感器原始数据采集组合。绿光与红光不能共存，IR 不能单独启动。
+enum SensorRawSelection {
+  acc(1),
+  ppgGreen(2),
+  ppgGreenAndAcc(3),
+  ppgRed(4),
+  ppgRedAndAcc(5),
+  ppgGreenAndIr(10),
+  ppgGreenAccAndIr(11),
+  ppgRedAndIr(12),
+  ppgRedAccAndIr(13);
+
+  const SensorRawSelection(this.value);
+  final int value;
+}
+
+/// 原始数据包类型。注意：其编号与 [SensorRawSelection] 的控制组合不同。
+enum SensorRawDataType {
+  timestamp(0),
+  ppg(1),
+  acc(2),
+  ppgRed(3),
+  ir(4),
+  sleep(5),
+  unknown(-1);
+
+  const SensorRawDataType(this.value);
+  final int value;
+
+  static SensorRawDataType fromValue(int value) => values.firstWhere(
+    (item) => item.value == value,
+    orElse: () => SensorRawDataType.unknown,
+  );
 }

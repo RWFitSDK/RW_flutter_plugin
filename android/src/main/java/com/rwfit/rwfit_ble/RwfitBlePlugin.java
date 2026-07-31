@@ -53,7 +53,7 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
         EventChannel.StreamHandler, ActivityAware {
 
     private static final String TAG = "RwfitBlePlugin";
-    private static final String PLUGIN_VERSION = "0.0.2";
+    private static final String PLUGIN_VERSION = "0.0.3";
 
     private MethodChannel methodChannel;
     private EventChannel eventChannel;
@@ -63,9 +63,16 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
 
     // 长期订阅引用（切换/重设时先 dispose 旧的，避免事件叠加）
     private HealthDataBroCallback realtimeDataCallback;
+    private HealthDataControlCallback realtimeMeasureStateCallback;
     private SportDataPushCallback workoutRealtimeCallback;
     private TakePhotoCallback takePhotoEventCallback;
     private MusicPushSettingCallback musicControlEventCallback;
+    private CallRemindCallback callControlEventCallback;
+    private HrBoActualReminderCallback healthAlertEventCallback;
+    private TouchEventCallback touchEventCallback;
+    private FactoryTestCallback factoryTestCallback;
+    private SensorRawDataCallback sensorRawDataCallback;
+    private SensorRawControlCallback sensorRawControlCallback;
 
     private RWFitCallbackManager cb() {
         RWFitCallbackManager m = RWFitCallbackManager.getInstance();
@@ -86,10 +93,7 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
 
     @Override
     public void onDetachedFromEngine(@NonNull FlutterPluginBinding binding) {
-        if (workoutRealtimeCallback != null) {
-            DHBleSdk.INSTANCE.dispose(workoutRealtimeCallback);
-            workoutRealtimeCallback = null;
-        }
+        disposePersistentCallbacks();
         methodChannel.setMethodCallHandler(null);
         eventChannel.setStreamHandler(null);
     }
@@ -158,8 +162,9 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
                     break;
                 }
                 case "startScan": {
-                    Boolean filter = call.argument("filter");
-                    ScanBleService.getService().startScan(filter != null ? filter : true, null);
+                    // Flutter 扫描只返回 SDK 支持的设备；false 表示普通界面扫描，
+                    // 不能把对外参数误传成原生的 isAutoConnect。
+                    ScanBleService.getService().startScan(false, null);
                     result.success(success());
                     break;
                 }
@@ -168,10 +173,12 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
                     result.success(success());
                     break;
                 case "connectDevice":
-                case "reconnectDevice":
-                    connectDevice(call);
-                    result.success(success());
+                case "reconnectDevice": {
+                    if (connectDevice(call, result)) {
+                        result.success(success());
+                    }
                     break;
+                }
                 case "disconnect":
                     DHBleSdk.INSTANCE.disconnect();
                     result.success(success());
@@ -184,6 +191,7 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
                 case "controlHealthData": controlHealthData(call, result); break;
                 case "controlFindDevice": controlFindDevice(result); break;
                 case "controlTakePhoto": controlTakePhoto(call, result); break;
+                case "controlPhone": controlPhone(call, result); break;
                 case "setPowerOff": {
                     Integer type = call.argument("type");
                     DHBleSdk.INSTANCE.setPowerOffJL(type != null ? type : 1);
@@ -215,6 +223,12 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
                 case "setTimeFormat": setTimeFormat(call, result); break;
                 case "getFunctionList": getFunctionList(result); break;
                 case "setRingBtName": setRingBtName(call, result); break;
+                case "getMuslimCountEnabled": getMuslimCountEnabled(result); break;
+                case "setMuslimCountEnabled": setMuslimCountEnabled(call, result); break;
+                case "getHeartRateAlert": getHeartRateAlert(result); break;
+                case "setHeartRateAlert": setHeartRateAlert(call, result); break;
+                case "getBloodOxygenAlert": getBloodOxygenAlert(result); break;
+                case "setBloodOxygenAlert": setBloodOxygenAlert(call, result); break;
                 // ---- 多运动 ----
                 case "getWorkoutState": getWorkoutState(result); break;
                 case "controlWorkout": controlWorkout(call, result); break;
@@ -233,6 +247,10 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
                 case "setTimedBloodSugar": setTimed(call, result, "sugar"); break;
                 case "getTimedBloodPressure": getTimed(result, "bp"); break;
                 case "setTimedBloodPressure": setTimed(call, result, "bp"); break;
+                case "getTimedBodyTemperature": getTimed(result, "temp"); break;
+                case "setTimedBodyTemperature": setTimed(call, result, "temp"); break;
+                case "getTimedPPG": getTimed(result, "ppg"); break;
+                case "setTimedPPG": setTimed(call, result, "ppg"); break;
                 // ---- 闹钟 ----
                 case "getAlarm": getAlarm(result); break;
                 case "setAlarm": setAlarm(call, result); break;
@@ -266,6 +284,16 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
                 case "setVibrationCount": setVibrationCount(call, result); break;
                 case "getAlarmVibrationDuration": getAlarmVibrationDuration(result); break;
                 case "setAlarmVibrationDuration": setAlarmVibrationDuration(call, result); break;
+                case "getVibrationInterval": getVibrationInterval(result); break;
+                case "setVibrationInterval": setVibrationInterval(call, result); break;
+                case "startHeartRateCalibration": startHeartRateCalibration(result); break;
+                case "getFallDetect": getFallDetect(result); break;
+                case "setFallDetect": setFallDetect(call, result); break;
+                case "getCountReminderInterval": getCountReminderInterval(result); break;
+                case "setCountReminderInterval": setCountReminderInterval(call, result); break;
+                // ---- 传感器原始数据 ----
+                case "controlSensorRaw": controlSensorRaw(call, result); break;
+                case "getSensorRawHistory": getSensorRawHistory(result); break;
                 // ---- 消息推送（Android 专用）----
                 case "pushMessage": pushMessage(call, result); break;
                 default:
@@ -288,17 +316,24 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
         DHBleSdk.INSTANCE.setConnectBleCallback(cb());
         ScanBleService.getService().initBle(activity);
         ScanBleService.getService().registerScanBleCallback(cb());
+        registerPersistentCallbacks();
         result.success(success());
     }
 
-    private void connectDevice(MethodCall call) {
+    private boolean connectDevice(MethodCall call, Reply result) {
+        String mac = s(call, "mac");
+        if (mac.trim().isEmpty()) {
+            result.error(-1, "mac is required on Android");
+            return false;
+        }
         BleDevice device = new BleDevice();
-        device.setBleName((String) call.argument("name"));
-        device.setBleMac((String) call.argument("mac"));
+        device.setBleName(s(call, "name"));
+        device.setBleMac(mac);
         Integer rssi = call.argument("rssi");
         device.setBleRssi(rssi != null ? rssi : 0);
         DHBleSdk.INSTANCE.setConnectBleCallback(cb());
         DHBleSdk.INSTANCE.connectDeviceWithModel(device);
+        return true;
     }
 
     private void getPower(final Reply result) {
@@ -370,7 +405,12 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
     }
 
     private void controlWorkout(MethodCall call, final Reply result) {
-        BleActivityMode sportType = BleActivityMode.Companion.fromValue(i(call, "sportType"));
+        int rawSportType = i(call, "sportType");
+        if (rawSportType < 7 || rawSportType > 161) {
+            result.error(-1, "sportType must be between 7 and 161");
+            return;
+        }
+        BleActivityMode sportType = BleActivityMode.Companion.fromValue(rawSportType);
         WorkoutControlType controlType =
                 WorkoutControlType.Companion.fromValue(i(call, "controlType"));
         if (sportType == null || controlType == null) {
@@ -413,7 +453,8 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
                     event.put("duration", asInt(data.gettActivityTime()));
                     event.put("steps", asInt(data.gettActivitySteps()));
                     event.put("distance", asInt(data.gettActivityDistance()));
-                    event.put("calorie", asInt(data.gettActivityCalorie()));
+                    // 当前 Android AAR 未除协议的 10 倍缩放，先在桥接层与 iOS 对齐。
+                    event.put("calorie", asInt(data.gettActivityCalorie()) / 10);
                     event.put("heartRate", asInt(data.gettActivityHr()));
                     // Android SportDataPushCallback 对应 iOS 的 BLE_KEY_APP_WORKOUT_DATA。
                     event.put("dataType", 0x0223);
@@ -423,8 +464,18 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
             DHBleSdk.INSTANCE.subscribeData(workoutRealtimeCallback);
         }
 
+        DHBleSdk.INSTANCE.subscribeData(new SportDataPushCallback() {
+            @Override public void onResult(SportDataPushBean data) {}
+            @Override public void onFail(int errorCode) {
+                result.error(errorCode, "setWorkoutRealtimeEnabled failed");
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+            @Override public void onSuccess() {
+                result.success(success());
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+        });
         DHBleSdk.INSTANCE.setExerciseMore(enabled ? 1 : 0);
-        result.success(success());
     }
 
     private void getWorkoutReports(final Reply result) {
@@ -465,11 +516,14 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
         report.put("duration", item.getExerciseTime());
         report.put("step", item.getStep());
         report.put("distance", item.getDistance());
-        report.put("calorie", item.getCalorie());
+        // 当前 Android AAR 保留协议原始 10 倍值；Flutter 对外按 iOS 的 Cal 返回。
+        report.put("calorie", item.getCalorie() / 10);
         report.put("height", item.getHeight());
         report.put("pressure", item.getBarometricPressure());
         report.put("cadence", item.getCadence());
-        report.put("speed", (double) item.getSpeed());
+        // AAR 按大端整数读取了线序中的小端 IEEE-754 float，先反转字节再按位还原。
+        report.put("speed", (double) Float.intBitsToFloat(
+                Integer.reverseBytes(item.getSpeed())));
         report.put("pace", item.getPace());
         report.put("averageHeartRate", item.getAverageHr());
         report.put("maxHeartRate", item.getMaxHr());
@@ -586,12 +640,8 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
     }
 
     private void controlFindDevice(final Reply result) {
-        DHBleSdk.INSTANCE.subscribeData(new FindDeviceControlCallback() {
-            @Override public void onSuccess() { result.success(success()); }
-            @Override public void onFail(int errorCode) { result.error(errorCode, "controlFindDevice failed"); }
-            @Override public void onResult(Integer data) {}
-        });
         DHBleSdk.INSTANCE.controlFindDeviceJL();
+        result.success(success());
     }
 
     private void controlTakePhoto(MethodCall call, Reply result) {
@@ -602,6 +652,8 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
                 @Override public void onSuccess() {}
                 @Override public void onFail(int errorCode) {}
                 @Override public void onResult(Integer data) {
+                    // 设备上报 2 表示请求 App 拍照；0/1 分别是退出/进入拍照模式。
+                    if (data == null || data != 2) return;
                     JSONObject eventData = new JSONObject();
                     eventData.put("keyType", 0);
                     eventData.put("touchType", 0);
@@ -611,31 +663,166 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
             };
             DHBleSdk.INSTANCE.subscribeData(takePhotoEventCallback);
         }
+        DHBleSdk.INSTANCE.subscribeData(new TakePhotoCallback() {
+            @Override public void onResult(Integer data) {}
+            @Override public void onFail(int errorCode) {
+                result.error(errorCode, "controlTakePhoto failed");
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+            @Override public void onSuccess() {
+                result.success(success());
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+        });
         DHBleSdk.INSTANCE.controlTakePhotoJL(state);
-        result.success(success());
+    }
+
+    private void controlPhone(MethodCall call, final Reply result) {
+        registerPersistentCallbacks();
+        DHBleSdk.INSTANCE.subscribeData(new CallRemindCallback() {
+            @Override public void onResult(Integer data) {}
+            @Override public void onFail(int errorCode) {
+                result.error(errorCode, "controlPhone failed");
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+            @Override public void onSuccess() {
+                result.success(success());
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+        });
+        DHBleSdk.INSTANCE.controlPhoneJL(i(call, "action"));
+    }
+
+    private void getMuslimCountEnabled(final Reply result) {
+        DHBleSdk.INSTANCE.subscribeData(new MuslimCountSwitchCallback() {
+            @Override public void onResult(Integer data) {
+                Map<String, Object> response = success();
+                response.put("enabled", data != null && data == 1);
+                result.success(response);
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+            @Override public void onFail(int errorCode) {
+                result.error(errorCode, "getMuslimCountEnabled failed");
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+            @Override public void onSuccess() {}
+        });
+        DHBleSdk.INSTANCE.deviceRememberSwitchGet();
+    }
+
+    private void setMuslimCountEnabled(MethodCall call, final Reply result) {
+        DHBleSdk.INSTANCE.subscribeData(new MuslimCountSwitchCallback() {
+            @Override public void onResult(Integer data) {}
+            @Override public void onFail(int errorCode) {
+                result.error(errorCode, "setMuslimCountEnabled failed");
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+            @Override public void onSuccess() {
+                result.success(success());
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+        });
+        DHBleSdk.INSTANCE.deviceRememberSwitch(b(call, "enabled") ? 1 : 0);
+    }
+
+    private void getHeartRateAlert(final Reply result) {
+        DHBleSdk.INSTANCE.subscribeData(new HrReminderCallback() {
+            @Override public void onResult(HrReminderBean data) {
+                if (data == null) return;
+                Map<String, Object> response = success();
+                response.put("isOpen", data.isOpen());
+                response.put("highThreshold", data.getRemindValue());
+                if (data.getUnderValue() != 0xff) {
+                    response.put("lowThreshold", data.getUnderValue());
+                }
+                result.success(response);
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+            @Override public void onFail(int errorCode) {
+                result.error(errorCode, "getHeartRateAlert failed");
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+            @Override public void onSuccess() {}
+        });
+        DHBleSdk.INSTANCE.deviceGetHrAlertCmd();
+    }
+
+    private void setHeartRateAlert(MethodCall call, final Reply result) {
+        Integer lowThreshold = call.argument("lowThreshold");
+        DHBleSdk.INSTANCE.subscribeData(new HrReminderCallback() {
+            @Override public void onResult(HrReminderBean data) {}
+            @Override public void onFail(int errorCode) {
+                result.error(errorCode, "setHeartRateAlert failed");
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+            @Override public void onSuccess() {
+                result.success(success());
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+        });
+        DHBleSdk.INSTANCE.deviceSetHrAlertCmd(
+                b(call, "isOpen") ? 1 : 0,
+                i(call, "highThreshold"),
+                lowThreshold != null ? lowThreshold : 0xff);
+    }
+
+    private void getBloodOxygenAlert(final Reply result) {
+        DHBleSdk.INSTANCE.subscribeData(new BoReminderCallback() {
+            @Override public void onResult(BoReminderBean data) {
+                if (data == null) return;
+                Map<String, Object> response = success();
+                response.put("isOpen", data.isOpen());
+                response.put("lowThreshold", data.getRemindValue());
+                result.success(response);
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+            @Override public void onFail(int errorCode) {
+                result.error(errorCode, "getBloodOxygenAlert failed");
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+            @Override public void onSuccess() {}
+        });
+        DHBleSdk.INSTANCE.deviceGetBoAlertCmd();
+    }
+
+    private void setBloodOxygenAlert(MethodCall call, final Reply result) {
+        DHBleSdk.INSTANCE.subscribeData(new BoReminderCallback() {
+            @Override public void onResult(BoReminderBean data) {}
+            @Override public void onFail(int errorCode) {
+                result.error(errorCode, "setBloodOxygenAlert failed");
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+            @Override public void onSuccess() {
+                result.success(success());
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+        });
+        DHBleSdk.INSTANCE.deviceSetBoAlertCmd(
+                b(call, "isOpen") ? 1 : 0,
+                i(call, "lowThreshold"));
     }
 
     private void ringOta(MethodCall call, final Reply result) {
         String otaPath = call.argument("path");
         DHBleSdk.INSTANCE.ringOtaWithFileData(otaPath, new OnFileTransferCallback() {
             @Override public void onProgress(float pro) {
-                // 归一化到 0–1（iOS 端 SDK 回调已是 0–1；Android SDK 若返 0–100 则除 100）
+                // 归一化到 0–1。当前 Android SDK 回调尺度为 0–1；大于 1
+                // 的分支仅作防御性兼容，当前 SDK 版本未验证会返回 0–100。
                 float normalized = pro > 1.0f ? pro / 100.0f : pro;
                 fireEvent("rwfit:otaProgress", "progress", normalized);
             }
             @Override public void onFinish() {
                 fireEvent("rwfit:otaFinish", null, 0);
-                result.success(success());
             }
             @Override public void onFail(int code) {
                 fireEvent("rwfit:otaFinish", "code", code);
-                result.error(code, "OTA failed");
             }
         });
+        // Future 只表示升级任务已成功提交；终态统一通过 onOtaFinish。
+        result.success(success());
     }
 
     private void unbind(final Reply result) {
-        DHBleSdk.INSTANCE.unbindJL();
         DHBleSdk.INSTANCE.subscribeStatus(new CommonStatusCallback() {
             @Override public void onSuccess(int msgId) {
                 result.success(success());
@@ -646,6 +833,7 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
                 DHBleSdk.INSTANCE.dispose(this);
             }
         });
+        DHBleSdk.INSTANCE.unbindJL();
     }
 
     // ==================== 设备信息 ====================
@@ -654,8 +842,6 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
         PersonBean person = new PersonBean();
         person.setGender(i(call, "gender"));
         // Android SDK 接收 cm/kg 浮点值，与 Dart 层传入一致。
-        // 注意：iOS 端 ×10 转 NSInteger（iOS SDK 用整数、保 0.1 精度）——
-        // 两端桥接层内部各自做单位适配，对 Dart 暴露的都是 cm/kg 浮点。
         person.setHeight(f(call, "height"));
         person.setWeight(f(call, "weight"));
         person.setAge(i(call, "age"));
@@ -677,10 +863,12 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
     }
 
     private void getFunctionList(final Reply result) {
-        DHBleSdk.INSTANCE.getFunctionListV2JL();
         DHBleSdk.INSTANCE.subscribeData(new SupportCallback() {
             @Override public void onSuccess() {}
-            @Override public void onFail(int errorCode) { result.error(errorCode, "getFunctionList failed"); }
+            @Override public void onFail(int errorCode) {
+                result.error(errorCode, "getFunctionList failed");
+                DHBleSdk.INSTANCE.dispose(this);
+            }
             @Override public void onResult(SupportMenuBean bean) {
                 Map<String, Object> r = success();
                 r.put("supportMenu", supportMenuMap(bean));
@@ -688,10 +876,26 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
                 DHBleSdk.INSTANCE.dispose(this);
             }
         });
+        DHBleSdk.INSTANCE.getFunctionListV2JL();
     }
 
-    private Map<String, Object> supportMenuMap(SupportMenuBean bean) {
+    static Map<String, Object> supportMenuMap(SupportMenuBean bean) {
         Map<String, Object> menu = new HashMap<>();
+        menu.put("isPushMsgEnableSwitch", bean.isPushMsgEnableSwitch());
+        menu.put("pushMsgSwitchValue", bean.getPushMsgSwitchValue());
+        menu.put("pushMsgSwitchValue2", bean.getPushMsgSwitchValue2());
+        int activityDataInterval = bean.getActivityDataInterval();
+        menu.put("activityDataInterval", activityDataInterval > 0 ? activityDataInterval : 60);
+        menu.put("isAlarm", bean.isAlarm());
+        menu.put("isBrightScreenSleepTime", bean.isBrightScreenSleepTime());
+        menu.put("isBrightScreenTime", bean.isBrightScreenTime());
+        menu.put("isSupportWorkout", bean.isNewSport());
+        menu.put("isRememberSwitch", bean.isRememberSwitch());
+        menu.put("isSupportHrReminder", bean.isSupportHrReminder());
+        menu.put("isSupportBoReminder", bean.isSupportBoReminder());
+        menu.put("isSupportMotoVibrationLevel", bean.isSupportMotoVibrationLevel());
+        menu.put("isSupportAlarmVibrationDuration", bean.isSupportAlarmVibrationDuration());
+        menu.put("isSupportVibrationInterval", bean.isSupportVibrationInterval());
         menu.put("isStep", bean.isStep());
         menu.put("isSleep", bean.isSleep());
         menu.put("isHr", bean.isHr());
@@ -700,30 +904,44 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
         menu.put("isBloodSugar", bean.isBloodSugar());
         menu.put("isHrv", bean.isHrv());
         menu.put("isPressure", bean.isPressure());
+        menu.put("isMuslimCountData", bean.isMuslimCountData());
         menu.put("isBodyTemp", bean.isDataTypeTemperature());
-        menu.put("isAlarm", bean.isAlarm());
-        menu.put("isBrightScreenTime", bean.isBrightScreenTime());
-        menu.put("isBrightScreenSleepTime", bean.isBrightScreenSleepTime());
-        menu.put("isPushMsgEnableSwitch", bean.isPushMsgEnableSwitch());
+        menu.put("isSupportMuslimTimeDisplayMode", bean.isSupportMuslimTimeDisplayMode());
+        menu.put("isSupportSensorRawPPG", bean.isSupportSensorRawPPG());
+        menu.put("isSupportPPGMonitoring", bean.isSupportPPGMonitoring());
+        menu.put("isSupportTemperatureMonitoring", bean.isSupportTemperatureMonitoring());
+        menu.put("isSupportCountReminder", bean.isSupportCountReminder());
+        menu.put("isSupportSensorRawACC", bean.isSupportSensorRawACC());
+        menu.put("isSupportSensorRawPPGRed", bean.isSupportSensorRawPPGRed());
+        menu.put("isSupportSensorRawIR", bean.isSupportSensorRawIR());
+        menu.put("isSupportSensorRawSleep", bean.isSupportSensorRawSleep());
+        menu.put("isSupportFallDetect", bean.isSupportFallDetect());
+        menu.put("isSupportRecording", bean.isSupportRecording());
         menu.put("isFindDevice", bean.isFindDevice());
         menu.put("isTakePhoto", bean.isTakePhoto());
-        menu.put("isSupportMotoVibrationLevel", bean.isSupportMotoVibrationLevel());
-        menu.put("isSupportAlarmVibrationDuration", bean.isSupportAlarmVibrationDuration());
-        menu.put("isMuslimCountData", bean.isMuslimCountData());
-        menu.put("isSupportMuslimTimeDisplayMode", bean.isSupportMuslimTimeDisplayMode());
+        menu.put("isLedLight", bean.isLEDLight());
+        menu.put("isWearDirection", bean.isWearDir());
+        menu.put("isVideoHid", bean.isVideoHid());
+        menu.put("isVideoHidBook", bean.isVideoHidBook());
+        menu.put("isVideoHidMusic", bean.isVideoHidMusic());
+        menu.put("isRaiseBrightScreen", bean.isRaiseBrightScreen());
+        menu.put("isPowerOff", bean.isPowerOff());
+        menu.put("isFactoryReset", bean.isRecovery());
+        menu.put("isPushMessage", bean.isMsgNotification());
         return menu;
     }
 
-    // ==================== 全天检测（6 项共用 DrinkReminderBean）====================
+    // ==================== 全天检测（8 项共用 DrinkReminderBean）====================
 
     private DrinkReminderBean timedBean(MethodCall call) {
         DrinkReminderBean bean = new DrinkReminderBean();
         bean.setOpen(b(call, "isOpen"));
         bean.setRemindDuration(i(call, "duration"));
-        bean.setStartHour(i(call, "startHour"));
-        bean.setStartMin(i(call, "startMin"));
-        bean.setEndHour(i(call, "endHour"));
-        bean.setEndMin(i(call, "endMin"));
+        // 全天检测协议固定为 00:00–23:59，不透传调用方自定义时段。
+        bean.setStartHour(0);
+        bean.setStartMin(0);
+        bean.setEndHour(23);
+        bean.setEndMin(59);
         return bean;
     }
 
@@ -732,10 +950,10 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
         Map<String, Object> r = success();
         r.put("isOpen", d.isOpen());
         r.put("duration", d.getRemindDuration());
-        r.put("startHour", d.getStartHour());
-        r.put("startMin", d.getStartMin());
-        r.put("endHour", d.getEndHour());
-        r.put("endMin", d.getEndMin());
+        r.put("startHour", 0);
+        r.put("startMin", 0);
+        r.put("endHour", 23);
+        r.put("endMin", 59);
         result.success(r);
     }
 
@@ -788,6 +1006,22 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
                     @Override public void onSuccess() {}
                 });
                 DHBleSdk.INSTANCE.getTimedBloodPressureJL();
+                break;
+            case "temp":
+                DHBleSdk.INSTANCE.subscribeData(new TimedBodyTemperatureCallback() {
+                    @Override public void onResult(DrinkReminderBean d) { timedReply(result, d); DHBleSdk.INSTANCE.dispose(this); }
+                    @Override public void onFail(int e) { result.error(e, "getTimed failed"); DHBleSdk.INSTANCE.dispose(this); }
+                    @Override public void onSuccess() {}
+                });
+                DHBleSdk.INSTANCE.getTimedBodyTemperature();
+                break;
+            case "ppg":
+                DHBleSdk.INSTANCE.subscribeData(new TimedPPGCallback() {
+                    @Override public void onResult(DrinkReminderBean d) { timedReply(result, d); DHBleSdk.INSTANCE.dispose(this); }
+                    @Override public void onFail(int e) { result.error(e, "getTimed failed"); DHBleSdk.INSTANCE.dispose(this); }
+                    @Override public void onSuccess() {}
+                });
+                DHBleSdk.INSTANCE.getTimedPPGJL();
                 break;
         }
     }
@@ -843,6 +1077,22 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
                 });
                 DHBleSdk.INSTANCE.setTimedBloodPressureJL(bean);
                 break;
+            case "temp":
+                DHBleSdk.INSTANCE.subscribeData(new TimedBodyTemperatureCallback() {
+                    @Override public void onResult(DrinkReminderBean d) {}
+                    @Override public void onFail(int e) { result.error(e, "setTimed failed"); DHBleSdk.INSTANCE.dispose(this); }
+                    @Override public void onSuccess() { result.success(success()); DHBleSdk.INSTANCE.dispose(this); }
+                });
+                DHBleSdk.INSTANCE.setTimedBodyTemperature(bean);
+                break;
+            case "ppg":
+                DHBleSdk.INSTANCE.subscribeData(new TimedPPGCallback() {
+                    @Override public void onResult(DrinkReminderBean d) {}
+                    @Override public void onFail(int e) { result.error(e, "setTimed failed"); DHBleSdk.INSTANCE.dispose(this); }
+                    @Override public void onSuccess() { result.success(success()); DHBleSdk.INSTANCE.dispose(this); }
+                });
+                DHBleSdk.INSTANCE.setTimedPPGJL(bean);
+                break;
         }
     }
 
@@ -860,7 +1110,6 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
                         item.put("startHour", bean.getStartHour());
                         item.put("startMin", bean.getStartMin());
                         item.put("isOpen", bean.isOpen());
-                        item.put("alarmTag", bean.getAlarmTag());
                         int[] repeatModel = bean.getRepeatModel();
                         JSONArray repeats = new JSONArray();
                         if (repeatModel != null) for (int v : repeatModel) repeats.add(v);
@@ -889,8 +1138,8 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
                 bean.setStartHour(asInt(item.get("startHour")));
                 bean.setStartMin(asInt(item.get("startMin")));
                 bean.setOpen(Boolean.TRUE.equals(item.get("isOpen")));
-                Object tag = item.get("alarmTag");
-                bean.setAlarmTag(tag instanceof String ? (String) tag : "");
+                // 当前协议包不包含 alarmTag，对外不暴露无效字段。
+                bean.setAlarmTag("");
                 int[] repeatModel = new int[7];
                 Object rep = item.get("repeats");
                 if (rep instanceof List) {
@@ -963,7 +1212,10 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
                 result.success(r);
                 DHBleSdk.INSTANCE.dispose(this);
             }
-            @Override public void onFail(int e) {}
+            @Override public void onFail(int e) {
+                result.error(e, "getBrightScreenTime failed");
+                DHBleSdk.INSTANCE.dispose(this);
+            }
             @Override public void onSuccess() {}
         });
         DHBleSdk.INSTANCE.getBrightScreenTimeJL();
@@ -993,7 +1245,10 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
                 result.success(r);
                 DHBleSdk.INSTANCE.dispose(this);
             }
-            @Override public void onFail(int e) {}
+            @Override public void onFail(int e) {
+                result.error(e, "getBrightScreenSleepTime failed");
+                DHBleSdk.INSTANCE.dispose(this);
+            }
             @Override public void onSuccess() {}
         });
         DHBleSdk.INSTANCE.getRingBrightScreenSleepTime();
@@ -1024,7 +1279,10 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
                 result.success(r);
                 DHBleSdk.INSTANCE.dispose(this);
             }
-            @Override public void onFail(int e) {}
+            @Override public void onFail(int e) {
+                result.error(e, "getRingLedLevel failed");
+                DHBleSdk.INSTANCE.dispose(this);
+            }
             @Override public void onSuccess() {}
         });
         DHBleSdk.INSTANCE.getRingLedLevel();
@@ -1053,7 +1311,10 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
                 result.success(r);
                 DHBleSdk.INSTANCE.dispose(this);
             }
-            @Override public void onFail(int e) {}
+            @Override public void onFail(int e) {
+                result.error(e, "getVideoHid failed");
+                DHBleSdk.INSTANCE.dispose(this);
+            }
             @Override public void onSuccess() {}
         });
         DHBleSdk.INSTANCE.getVideoHidJL();
@@ -1152,6 +1413,160 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
         DHBleSdk.INSTANCE.setAlarmVibrationDuration(duration);
     }
 
+    private void getVibrationInterval(final Reply result) {
+        DHBleSdk.INSTANCE.subscribeData(new VibrationIntervalCallback() {
+            @Override public void onResult(Integer data) {
+                Map<String, Object> response = success();
+                response.put("intervalMs", data != null ? data : 0);
+                result.success(response);
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+            @Override public void onFail(int errorCode) {
+                result.error(errorCode, "getVibrationInterval failed");
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+            @Override public void onSuccess() {}
+        });
+        DHBleSdk.INSTANCE.getVibrationInterval();
+    }
+
+    private void setVibrationInterval(MethodCall call, final Reply result) {
+        int intervalMs = i(call, "intervalMs");
+        DHBleSdk.INSTANCE.subscribeData(new VibrationIntervalCallback() {
+            @Override public void onResult(Integer data) {}
+            @Override public void onFail(int errorCode) {
+                result.error(errorCode, "setVibrationInterval failed");
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+            @Override public void onSuccess() {
+                result.success(success());
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+        });
+        DHBleSdk.INSTANCE.setVibrationInterval(intervalMs);
+    }
+
+    private void startHeartRateCalibration(final Reply result) {
+        registerPersistentCallbacks();
+        DHBleSdk.INSTANCE.subscribeData(new FactoryTestCallback() {
+            @Override public void onResult(long[] data) {}
+            @Override public void onFail(int errorCode) {
+                result.error(errorCode, "startHeartRateCalibration failed");
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+            @Override public void onSuccess() {
+                result.success(success());
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+        });
+        DHBleSdk.INSTANCE.startFactoryTest(0x15);
+    }
+
+    private void getFallDetect(final Reply result) {
+        DHBleSdk.INSTANCE.subscribeData(new FallDetectCallback() {
+            @Override public void onResult(Integer data) {
+                Map<String, Object> response = success();
+                response.put("enabled", data != null && data == 1);
+                result.success(response);
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+            @Override public void onFail(int errorCode) {
+                result.error(errorCode, "getFallDetect failed");
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+            @Override public void onSuccess() {}
+        });
+        DHBleSdk.INSTANCE.getFallDetect();
+    }
+
+    private void setFallDetect(MethodCall call, final Reply result) {
+        DHBleSdk.INSTANCE.subscribeData(new FallDetectCallback() {
+            @Override public void onResult(Integer data) {}
+            @Override public void onFail(int errorCode) {
+                result.error(errorCode, "setFallDetect failed");
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+            @Override public void onSuccess() {
+                result.success(success());
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+        });
+        DHBleSdk.INSTANCE.setFallDetect(b(call, "enabled"));
+    }
+
+    private void getCountReminderInterval(final Reply result) {
+        DHBleSdk.INSTANCE.subscribeData(new CountReminderIntervalCallback() {
+            @Override public void onResult(Integer data) {
+                Map<String, Object> response = success();
+                response.put("intervalMinutes", data != null ? data : 0);
+                result.success(response);
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+            @Override public void onFail(int errorCode) {
+                result.error(errorCode, "getCountReminderInterval failed");
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+            @Override public void onSuccess() {}
+        });
+        DHBleSdk.INSTANCE.getCountReminderInterval();
+    }
+
+    private void setCountReminderInterval(MethodCall call, final Reply result) {
+        DHBleSdk.INSTANCE.subscribeData(new CountReminderIntervalCallback() {
+            @Override public void onResult(Integer data) {}
+            @Override public void onFail(int errorCode) {
+                result.error(errorCode, "setCountReminderInterval failed");
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+            @Override public void onSuccess() {
+                result.success(success());
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+        });
+        DHBleSdk.INSTANCE.setCountReminderInterval(i(call, "intervalMinutes"));
+    }
+
+    private void controlSensorRaw(MethodCall call, final Reply result) {
+        registerPersistentCallbacks();
+        DHBleSdk.INSTANCE.subscribeData(new SensorRawControlCallback() {
+            @Override public void onResult(Integer data) {}
+            @Override public void onFail(int errorCode) {
+                result.error(errorCode, "controlSensorRaw failed");
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+            @Override public void onSuccess() {
+                result.success(success());
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+        });
+        DHBleSdk.INSTANCE.ringControlSensorRaw(
+                b(call, "enabled") ? 1 : 2,
+                i(call, "sensorType"));
+    }
+
+    private void getSensorRawHistory(final Reply result) {
+        final List<Object> packets = new ArrayList<>();
+        DHBleSdk.INSTANCE.subscribeData(new SensorHistoryRawCallback() {
+            @Override public void onResult(List<SensorHistoryRawBean> data) {
+                if (data == null) return;
+                for (SensorHistoryRawBean item : data) {
+                    if (item != null) packets.add(toCodecSafe(sensorHistoryRawPayload(item)));
+                }
+            }
+            @Override public void onFail(int errorCode) {
+                result.error(errorCode, "getSensorRawHistory failed");
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+            @Override public void onSuccess() {
+                Map<String, Object> response = success();
+                response.put("data", packets);
+                result.success(response);
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+        });
+        DHBleSdk.INSTANCE.ringGetHistorySensorRaw();
+    }
+
     // ==================== 消息推送（Android 专用）====================
 
     private void pushMessage(MethodCall call, final Reply result) {
@@ -1163,8 +1578,14 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
         if (call.argument("timeMill") != null) bean.setTimeMill(l(call, "timeMill"));
         DHBleSdk.INSTANCE.subscribeData(new MsgPushSettingCallback() {
             @Override public void onResult(Integer data) {}
-            @Override public void onFail(int e) { result.error(e, "pushMessage failed"); }
-            @Override public void onSuccess() { result.success(success()); }
+            @Override public void onFail(int e) {
+                result.error(e, "pushMessage failed");
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+            @Override public void onSuccess() {
+                result.success(success());
+                DHBleSdk.INSTANCE.dispose(this);
+            }
         });
         DHBleSdk.INSTANCE.setPushMsgJL(bean);
     }
@@ -1193,8 +1614,9 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
                 switch (data) {
                     case 1: action = "musicPlay"; break;
                     case 2: action = "musicPause"; break;
-                    case 3: action = "musicPrev"; break;
-                    case 4: action = "musicNext"; break;
+                    // Android SDK 文档的 prev/next 定义相反；按设备实际动作统一。
+                    case 3: action = "musicNext"; break;
+                    case 4: action = "musicPrev"; break;
                     case 5: action = "musicVolumeUp"; break;
                     case 6: action = "musicVolumeDown"; break;
                     default: return;
@@ -1272,18 +1694,254 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
                 return event;
             }
             case 9: {
-                // 血糖实时数据：RW SDK 复用 TempPartData 容器（getTemp() 返回血糖原始值）。
-                // 与 iOS 端 BLE_KEY_APP_REAL_BLOOD_SUGAR_DATA → dataType=9 对齐。
+                // Android SDK 将实时血糖协议原始值（实际值 ×10）暂存在
+                // TempPartData；桥接层除以 10，与历史数据及 iOS 统一为实际值。
                 List<TempPartData> list = data.getTempPartData();
                 if (list == null || list.isEmpty()) return null;
                 TempPartData last = list.get(list.size() - 1);
-                event.put("dataValue", last.getTemp());
+                event.put("dataValue", last.getTemp() / 10.0);
                 event.put("time", last.getTime());
                 return event;
             }
             default:
                 return null;
         }
+    }
+
+    private void registerPersistentCallbacks() {
+        if (realtimeMeasureStateCallback == null) {
+            realtimeMeasureStateCallback = new HealthDataControlCallback() {
+                @Override public void onResult(Integer data) {
+                    if (data != null && data >= 10) {
+                        fireEvent("rwfit:realtimeMeasureComplete", new JSONObject());
+                    }
+                }
+                @Override public void onFail(int errorCode) {}
+                @Override public void onSuccess() {}
+            };
+            DHBleSdk.INSTANCE.subscribeData(realtimeMeasureStateCallback);
+        }
+
+        if (callControlEventCallback == null) {
+            callControlEventCallback = new CallRemindCallback() {
+                @Override public void onResult(Integer data) {
+                    if (data == null) return;
+                    String action;
+                    if (data == 1) {
+                        action = "answer";
+                    } else if (data == 2) {
+                        action = "reject";
+                    } else {
+                        action = "unknown";
+                    }
+                    JSONObject event = new JSONObject();
+                    event.put("action", action);
+                    event.put("rawValue", data);
+                    fireEvent("rwfit:callControl", event);
+                }
+                @Override public void onFail(int errorCode) {}
+                @Override public void onSuccess() {}
+            };
+            DHBleSdk.INSTANCE.subscribeData(callControlEventCallback);
+        }
+
+        if (healthAlertEventCallback == null) {
+            healthAlertEventCallback = new HrBoActualReminderCallback() {
+                @Override public void onResult(HrBoActualReminderBean data) {
+                    if (data == null) return;
+                    JSONObject event = new JSONObject();
+                    event.put("type", data.getType());
+                    event.put("value", data.getRemindValue());
+                    fireEvent("rwfit:healthAlert", event);
+                }
+                @Override public void onFail(int errorCode) {}
+                @Override public void onSuccess() {}
+            };
+            DHBleSdk.INSTANCE.subscribeData(healthAlertEventCallback);
+        }
+
+        if (touchEventCallback == null) {
+            touchEventCallback = new TouchEventCallback() {
+                @Override public void onResult(int[] data) {
+                    if (data == null || data.length < 2) return;
+                    JSONObject event = new JSONObject();
+                    event.put("keyType", data[0]);
+                    event.put("touchType", data[1]);
+                    event.put("action", touchAction(data[0], data[1]));
+                    fireEvent("rwfit:touchEvent", event);
+                }
+                @Override public void onFail(int errorCode) {}
+                @Override public void onSuccess() {}
+            };
+            DHBleSdk.INSTANCE.subscribeData(touchEventCallback);
+        }
+
+        if (factoryTestCallback == null) {
+            factoryTestCallback = new FactoryTestCallback() {
+                @Override public void onResult(long[] data) {
+                    if (data == null || data.length < 2) return;
+                    JSONObject event = new JSONObject();
+                    event.put("testMode", data[0]);
+                    event.put("result", data[1]);
+                    fireEvent("rwfit:heartRateCalibration", event);
+                }
+                @Override public void onFail(int errorCode) {}
+                @Override public void onSuccess() {}
+            };
+            DHBleSdk.INSTANCE.subscribeData(factoryTestCallback);
+        }
+
+        if (sensorRawDataCallback == null) {
+            sensorRawDataCallback = new SensorRawDataCallback() {
+                @Override public void onResult(SensorRawDataBean data) {
+                    if (data != null) {
+                        fireEvent("rwfit:sensorRawData", sensorRawPayload(data));
+                    }
+                }
+                @Override public void onFail(int errorCode) {}
+                @Override public void onSuccess() {}
+            };
+            DHBleSdk.INSTANCE.subscribeData(sensorRawDataCallback);
+        }
+
+        if (sensorRawControlCallback == null) {
+            sensorRawControlCallback = new SensorRawControlCallback() {
+                @Override public void onResult(Integer data) {
+                    JSONObject event = new JSONObject();
+                    event.put("reason", data != null ? data : 0);
+                    fireEvent("rwfit:sensorRawStopped", event);
+                }
+                @Override public void onFail(int errorCode) {}
+                @Override public void onSuccess() {}
+            };
+            DHBleSdk.INSTANCE.subscribeData(sensorRawControlCallback);
+        }
+    }
+
+    private void disposePersistentCallbacks() {
+        if (realtimeDataCallback != null) {
+            DHBleSdk.INSTANCE.dispose(realtimeDataCallback);
+            realtimeDataCallback = null;
+        }
+        if (realtimeMeasureStateCallback != null) {
+            DHBleSdk.INSTANCE.dispose(realtimeMeasureStateCallback);
+            realtimeMeasureStateCallback = null;
+        }
+        if (workoutRealtimeCallback != null) {
+            DHBleSdk.INSTANCE.dispose(workoutRealtimeCallback);
+            workoutRealtimeCallback = null;
+        }
+        if (takePhotoEventCallback != null) {
+            DHBleSdk.INSTANCE.dispose(takePhotoEventCallback);
+            takePhotoEventCallback = null;
+        }
+        if (musicControlEventCallback != null) {
+            DHBleSdk.INSTANCE.dispose(musicControlEventCallback);
+            musicControlEventCallback = null;
+        }
+        if (callControlEventCallback != null) {
+            DHBleSdk.INSTANCE.dispose(callControlEventCallback);
+            callControlEventCallback = null;
+        }
+        if (healthAlertEventCallback != null) {
+            DHBleSdk.INSTANCE.dispose(healthAlertEventCallback);
+            healthAlertEventCallback = null;
+        }
+        if (touchEventCallback != null) {
+            DHBleSdk.INSTANCE.dispose(touchEventCallback);
+            touchEventCallback = null;
+        }
+        if (factoryTestCallback != null) {
+            DHBleSdk.INSTANCE.dispose(factoryTestCallback);
+            factoryTestCallback = null;
+        }
+        if (sensorRawDataCallback != null) {
+            DHBleSdk.INSTANCE.dispose(sensorRawDataCallback);
+            sensorRawDataCallback = null;
+        }
+        if (sensorRawControlCallback != null) {
+            DHBleSdk.INSTANCE.dispose(sensorRawControlCallback);
+            sensorRawControlCallback = null;
+        }
+    }
+
+    private String touchAction(int keyType, int touchType) {
+        if (keyType == 2) return "fallDetected";
+        if (keyType != 1) return "unknown";
+        switch (touchType) {
+            case 1: return "singleTap";
+            case 2: return "doubleTap";
+            case 3: return "tripleTap";
+            case 4: return "longPress";
+            case 5: return "swing";
+            default: return "unknown";
+        }
+    }
+
+    private JSONObject sensorRawPayload(SensorRawDataBean data) {
+        JSONObject payload = new JSONObject();
+        payload.put("type", data.getType());
+        if (data.getTimestamp() > 0) {
+            payload.put("timestampSec", data.getTimestamp());
+        }
+        putSensorRawLists(
+                payload,
+                data.getPpgDataList(),
+                data.getAccDataList(),
+                data.getPpgRedDataList(),
+                data.getIrDataList());
+
+        JSONArray sleep = new JSONArray();
+        List<long[]> sleepData = data.getSleepDataList();
+        if (sleepData != null) {
+            for (long[] item : sleepData) {
+                if (item == null || item.length < 2) continue;
+                JSONObject sample = new JSONObject();
+                sample.put("timestampSec", item[0]);
+                sample.put("mode", item[1]);
+                sleep.add(sample);
+            }
+        }
+        payload.put("sleep", sleep);
+        return payload;
+    }
+
+    private JSONObject sensorHistoryRawPayload(SensorHistoryRawBean data) {
+        JSONObject payload = new JSONObject();
+        payload.put("type", data.getType());
+        payload.put("sequence", data.getSequence());
+        putSensorRawLists(
+                payload,
+                data.getPpgDataList(),
+                data.getAccDataList(),
+                data.getPpgRedDataList(),
+                data.getIrDataList());
+        payload.put("sleep", new JSONArray());
+        return payload;
+    }
+
+    private void putSensorRawLists(
+            JSONObject payload,
+            List<Integer> ppg,
+            List<SensorRawDataBean.AccRawItem> acc,
+            List<Integer> ppgRed,
+            List<Integer> ir) {
+        payload.put("ppg", ppg != null ? ppg : new ArrayList<>());
+        payload.put("ppgRed", ppgRed != null ? ppgRed : new ArrayList<>());
+        payload.put("ir", ir != null ? ir : new ArrayList<>());
+
+        JSONArray accPayload = new JSONArray();
+        if (acc != null) {
+            for (SensorRawDataBean.AccRawItem item : acc) {
+                if (item == null) continue;
+                JSONObject sample = new JSONObject();
+                sample.put("x", item.getX());
+                sample.put("y", item.getY());
+                sample.put("z", item.getZ());
+                accPayload.add(sample);
+            }
+        }
+        payload.put("acc", accPayload);
     }
 
     // ==================== 事件转发 ====================

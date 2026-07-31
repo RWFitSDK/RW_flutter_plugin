@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:rwfit_ble/rwfit_ble.dart';
 
+import '../support_menu.dart';
 import '../widgets/result_tile.dart';
 
 /// 闹钟页：查询/全量设置/删除 演示（全量下发约束）。
 class AlarmPage extends StatefulWidget {
-  const AlarmPage({super.key});
+  const AlarmPage({super.key, required this.capabilities});
+
+  final DemoCapabilities capabilities;
 
   @override
   State<AlarmPage> createState() => _AlarmPageState();
@@ -25,7 +28,7 @@ class _AlarmPageState extends State<AlarmPage> {
       _log('获取闹钟 ✓ 共 ${list.length} 个');
       for (final a in list) {
         _log(
-          '  #${a.alarmId} ${a.startHour.toString().padLeft(2, '0')}:${a.startMin.toString().padLeft(2, '0')} ${a.isOpen ? "开" : "关"} tag=${a.alarmTag} repeats=${a.repeats}',
+          '  #${a.alarmId} ${a.startHour.toString().padLeft(2, '0')}:${a.startMin.toString().padLeft(2, '0')} ${a.isOpen ? "开" : "关"} repeats=${a.repeats}',
         );
       }
     } on RwfitException catch (e) {
@@ -41,15 +44,13 @@ class _AlarmPageState extends State<AlarmPage> {
         startHour: 7,
         startMin: 30,
         isOpen: true,
-        alarmTag: '起床',
-        repeats: [1, 1, 1, 1, 1, 0, 0], // 周一~周五
+        repeats: [0, 1, 1, 1, 1, 1, 0], // 周一~周五（index 0=周日）
       ),
       const Alarm(
         alarmId: 2,
         startHour: 22,
         startMin: 0,
         isOpen: true,
-        alarmTag: '睡觉',
         repeats: [1, 1, 1, 1, 1, 1, 1],
       ),
     ];
@@ -90,6 +91,7 @@ class _AlarmPageState extends State<AlarmPage> {
 
   @override
   Widget build(BuildContext context) {
+    final supported = widget.capabilities.has(DemoCapabilityKey.alarm);
     return Scaffold(
       appBar: AppBar(title: const Text('闹钟')),
       body: Column(
@@ -101,19 +103,19 @@ class _AlarmPageState extends State<AlarmPage> {
               runSpacing: 8,
               children: [
                 FilledButton.tonal(
-                  onPressed: _getAlarms,
-                  child: const Text('获取闹钟'),
+                  onPressed: supported ? _getAlarms : null,
+                  child: Text(supported ? '获取闹钟' : '获取闹钟(不支持)'),
                 ),
                 FilledButton.tonal(
-                  onPressed: _setDemo,
+                  onPressed: supported ? _setDemo : null,
                   child: const Text('设置示例闹钟'),
                 ),
                 FilledButton.tonal(
-                  onPressed: _toggleFirst,
+                  onPressed: supported ? _toggleFirst : null,
                   child: const Text('切换第1个开关'),
                 ),
                 FilledButton.tonal(
-                  onPressed: _deleteAll,
+                  onPressed: supported ? _deleteAll : null,
                   child: const Text('删除全部'),
                 ),
               ],

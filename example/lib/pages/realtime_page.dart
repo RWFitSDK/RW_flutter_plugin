@@ -3,9 +3,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:rwfit_ble/rwfit_ble.dart';
 
+import '../support_menu.dart';
+
 /// 实时测量页：演示 HR/BO/HRV/压力/血糖/血压（同一时间只能开一种）。
 class RealtimePage extends StatefulWidget {
-  const RealtimePage({super.key});
+  const RealtimePage({super.key, required this.capabilities});
+
+  final DemoCapabilities capabilities;
 
   @override
   State<RealtimePage> createState() => _RealtimePageState();
@@ -13,18 +17,27 @@ class RealtimePage extends StatefulWidget {
 
 class _RealtimePageState extends State<RealtimePage> {
   final _ring = RwfitBle.instance;
-  StreamSubscription? _sub;
+  StreamSubscription? _dataSub;
+  StreamSubscription? _completeSub;
   RealtimeMetric? _active;
   final _data = <String>[];
 
   @override
   void initState() {
     super.initState();
-    _sub = _ring.onRealtimeData.listen((d) {
+    _dataSub = _ring.onRealtimeData.listen((d) {
       final typeStr = d.type?.name ?? 'unknown';
       final extra = d.diastolic != null ? ' 舒张压=${d.diastolic}' : '';
       setState(() => _data.insert(0, '[$typeStr] ${d.value}$extra'));
       if (_data.length > 50) _data.removeLast();
+    });
+    _completeSub = _ring.onRealtimeMeasureComplete.listen((_) {
+      if (!mounted || _active == null) return;
+      final metric = _active!;
+      setState(() {
+        _active = null;
+        _data.insert(0, '[${metric.name}] 测量完成');
+      });
     });
   }
 
@@ -59,7 +72,8 @@ class _RealtimePageState extends State<RealtimePage> {
 
   @override
   void dispose() {
-    _sub?.cancel();
+    _dataSub?.cancel();
+    _completeSub?.cancel();
     if (_active != null) _ring.stopRealtimeMeasure(_active!);
     super.dispose();
   }
@@ -83,9 +97,15 @@ class _RealtimePageState extends State<RealtimePage> {
             children: [
               for (final m in RealtimeMetric.values)
                 ChoiceChip(
-                  label: Text(m.name),
+                  label: Text(
+                    widget.capabilities.supportsRealtime(m)
+                        ? m.name
+                        : '${m.name}(不支持)',
+                  ),
                   selected: _active == m,
-                  onSelected: (_) => _start(m),
+                  onSelected: widget.capabilities.supportsRealtime(m)
+                      ? (_) => _start(m)
+                      : null,
                 ),
             ],
           ),

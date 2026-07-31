@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:rwfit_ble/rwfit_ble.dart';
 
 import '../device_store.dart';
+import '../support_menu.dart';
 import 'device_info_page.dart';
 import 'timed_monitor_page.dart';
 import 'realtime_page.dart';
@@ -14,6 +16,8 @@ import 'ota_page.dart';
 import 'notify_page.dart';
 import 'scan_page.dart';
 import 'workout_page.dart';
+import 'health_alert_page.dart';
+import 'sensor_raw_page.dart';
 
 /// 功能主页 / 落地页（对标 index.vue）：连接管理 + 各功能子页入口。
 ///
@@ -30,7 +34,7 @@ class _HomePageState extends State<HomePage> {
   final _ring = RwfitBle.instance;
   final _subs = <StreamSubscription>[];
   bool _ready = false;
-  bool _supportsWorkout = false;
+  DemoCapabilities _capabilities = const DemoCapabilities.empty();
   String _conn = '未连接';
   BleDevice? _saved;
 
@@ -44,7 +48,7 @@ class _HomePageState extends State<HomePage> {
             e.state == ConnectState.failed) {
           setState(() {
             _ready = false;
-            _supportsWorkout = false;
+            _capabilities = const DemoCapabilities.empty();
           });
         }
       }),
@@ -53,7 +57,9 @@ class _HomePageState extends State<HomePage> {
       _ring.onFunctionMenu.listen((menu) async {
         setState(() {
           _ready = true;
-          _supportsWorkout = menu.supportsWorkout;
+          _capabilities = DemoCapabilities(
+            Map<String, dynamic>.unmodifiable(menu.raw),
+          );
           _conn = 'connected';
         });
         // 连接就绪 → 持久化当前设备供下次重连；iOS 置绑定态以启用内置重连。
@@ -116,6 +122,7 @@ class _HomePageState extends State<HomePage> {
       setState(() {
         _conn = 'disconnected';
         _ready = false;
+        _capabilities = const DemoCapabilities.empty();
       });
     } catch (e) {
       _toast('断开失败: $e');
@@ -161,40 +168,64 @@ class _HomePageState extends State<HomePage> {
                 ),
                 _tile(
                   '全天检测',
-                  '心率/血氧/HRV/压力/血糖/血压 定时配置',
+                  '心率/血氧/HRV/压力/血糖/血压/体温/PPG',
                   Icons.monitor_heart,
-                  () => _push(const TimedMonitorPage()),
+                  () => _push(TimedMonitorPage(capabilities: _capabilities)),
+                  enabled: _ready && _capabilities.supportsAnyTimedMonitor,
                 ),
                 _tile(
                   '实时测量',
                   '实时心率/血氧/血压等（互斥）',
                   Icons.favorite,
-                  () => _push(const RealtimePage()),
+                  () => _push(RealtimePage(capabilities: _capabilities)),
+                  enabled: _ready && _capabilities.supportsAnyRealtime,
                 ),
                 _tile(
                   '设备控制',
                   '找设备/关机/拍照/LED/佩戴/振动',
                   Icons.settings_remote,
-                  () => _push(const ControlPage()),
+                  () => _push(ControlPage(capabilities: _capabilities)),
+                  enabled:
+                      _ready &&
+                      (_capabilities.supportsAnyDeviceControl ||
+                          Platform.isAndroid),
+                ),
+                _tile(
+                  '赞念与健康报警',
+                  '赞念开关 / 心率和血氧报警 / 实时报警事件',
+                  Icons.health_and_safety_outlined,
+                  () => _push(HealthAlertPage(capabilities: _capabilities)),
+                  enabled: _ready && _capabilities.supportsAnyHealthAlert,
+                ),
+                _tile(
+                  '传感器原始数据',
+                  'PPG / ACC / Red / IR / 睡眠状态',
+                  Icons.sensors,
+                  () => _push(SensorRawPage(capabilities: _capabilities)),
+                  enabled: _ready && _capabilities.supportsAnySensorRaw,
                 ),
                 _tile(
                   '闹钟',
                   '查询/设置/删除（全量下发）',
                   Icons.alarm,
-                  () => _push(const AlarmPage()),
+                  () => _push(AlarmPage(capabilities: _capabilities)),
+                  enabled: _ready && _capabilities.has(DemoCapabilityKey.alarm),
                 ),
                 _tile(
                   '数据同步',
                   '历史健康数据同步',
                   Icons.sync,
-                  () => _push(const SyncPage()),
+                  () => _push(SyncPage(capabilities: _capabilities)),
+                  enabled: _ready && _capabilities.supportsAnyHealthData,
                 ),
                 _tile(
                   '多运动',
-                  _supportsWorkout ? '运动类型选择 / 实时运动控制与数据' : '当前设备不支持多运动',
+                  _capabilities.supportsWorkout
+                      ? '运动类型选择 / 实时运动控制与数据'
+                      : '当前设备不支持多运动',
                   Icons.directions_run,
                   () => _push(const WorkoutPage()),
-                  enabled: _ready && _supportsWorkout,
+                  enabled: _ready && _capabilities.supportsWorkout,
                 ),
                 _tile(
                   'OTA 升级',
@@ -206,7 +237,14 @@ class _HomePageState extends State<HomePage> {
                   '消息/通知',
                   'Android 推送 / iOS ANCS 开关',
                   Icons.notifications,
-                  () => _push(const NotifyPage()),
+                  () => _push(NotifyPage(capabilities: _capabilities)),
+                  enabled:
+                      _ready &&
+                      _capabilities.has(
+                        Platform.isAndroid
+                            ? DemoCapabilityKey.pushMessage
+                            : DemoCapabilityKey.pushMessageSwitch,
+                      ),
                 ),
               ],
             ),

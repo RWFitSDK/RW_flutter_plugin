@@ -1,5 +1,5 @@
 group = "com.rwfit.rwfit_ble"
-version = "0.0.2"
+version = "0.0.3"
 
 buildscript {
     repositories {

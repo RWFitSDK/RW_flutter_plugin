@@ -13,6 +13,8 @@
 @property (nonatomic, strong) DeviceFuncV2Model *deviceFuncModel;
 @property (nonatomic, assign) BOOL scanning;
 @property (nonatomic, assign) BOOL observersRegistered;
+@property (nonatomic, strong) NSTimer *scanTimeoutTimer;
+@property (nonatomic, assign) BOOL forwardHealthSyncEvents;
 @property (nonatomic, strong) NSMutableDictionary<NSString *, DHPeripheralModel *> *discoveredDevices;
 @end
 
@@ -56,13 +58,14 @@
         [DHBleCentralManager initWithServiceUuids:@[]];
         [DHBleCentralManager shareInstance].connectDelegate = self;
         self.scanning = NO;
+        self.forwardHealthSyncEvents = YES;
         self.discoveredDevices = [NSMutableDictionary dictionary];
         [self registerObserversIfNeeded];
         [self ok:result extra:nil];
     } else if ([m isEqualToString:@"getSDKVersion"]) {
         [self ok:result extra:@{@"version": [DHBleCommand getSDKVersion] ?: @""}];
     } else if ([m isEqualToString:@"getPluginVersion"]) {
-        NSString *v = [NSString stringWithFormat:@"0.0.2_%@", [DHBleCommand getSDKVersion] ?: @""];
+        NSString *v = [NSString stringWithFormat:@"0.0.3_%@", [DHBleCommand getSDKVersion] ?: @""];
         [self ok:result extra:@{@"pluginVersion": v}];
     } else if ([m isEqualToString:@"isBleConnected"]) {
         [self ok:result extra:@{@"connected": @([DHBleCentralManager isConnected])}];
@@ -71,11 +74,15 @@
         self.scanning = YES;
         [self.discoveredDevices removeAllObjects];
         [DHBleCentralManager startScan];
+        [self cancelScanTimeout];
+        self.scanTimeoutTimer = [NSTimer scheduledTimerWithTimeInterval:10.0
+                                                                target:self
+                                                              selector:@selector(scanDidTimeout:)
+                                                              userInfo:nil
+                                                               repeats:NO];
         [self ok:result extra:nil];
     } else if ([m isEqualToString:@"stopScan"]) {
-        self.scanning = NO;
-        [DHBleCentralManager stopScan];
-        [self fire:@"rwfit:scanFinish" data:@{}];
+        [self finishScanIfNeeded];
         [self ok:result extra:nil];
     } else if ([m isEqualToString:@"connectDevice"]) {
         [self connectDevice:args result:result];
@@ -110,8 +117,8 @@
     } else if ([m isEqualToString:@"setUserInfo"]) {
         DHUserInfoSetModel *model = [DHUserInfoSetModel new];
         model.gender = [args[@"gender"] integerValue];
-        // iOS SDK 的 height/weight 是 NSInteger，Dart 传浮点 cm/kg，桥接层 ×10 保 0.1 精度
-        model.height = (NSInteger)round([args[@"height"] doubleValue] * 10);
+        // iOS SDK 身高直接按 cm 编码；体重字段按 0.1 kg 编码。
+        model.height = (NSInteger)round([args[@"height"] doubleValue]);
         model.weight = (NSInteger)round([args[@"weight"] doubleValue] * 10);
         model.age = [args[@"age"] integerValue];
         [DHBleCommand setUserInfo:model block:^(int code, id data) {
@@ -136,9 +143,8 @@
             }];
         }
     } else if ([m isEqualToString:@"controlFindDevice"]) {
-        [DHBleCommand controlFindDeviceBegin:^(int code, id data) {
-            [self simple:code result:result action:@"controlFindDevice"];
-        }];
+        [DHBleCommand controlFindDeviceBegin:^(int code, id data) {}];
+        [self ok:result extra:nil];
     } else if ([m isEqualToString:@"setPowerOff"]) {
         NSInteger type = [args[@"type"] integerValue];
         [DHBleCommand controlDevice:type block:^(int code, id data) {}];
@@ -164,6 +170,59 @@
         [DHBleCommand setRingBtName:[self stringValue:args[@"name"]] block:^(int code, id data) {
             [self simple:code result:result action:@"setRingBtName"];
         }];
+    } else if ([m isEqualToString:@"getMuslimCountEnabled"]) {
+        [DHBleCommand getMuslimCountSwitch:^(int code, id data) {
+            [self handleCode:code result:result successBlock:^{
+                [self ok:result extra:@{@"enabled": @([data integerValue] == 1)}];
+            }];
+        }];
+    } else if ([m isEqualToString:@"setMuslimCountEnabled"]) {
+        UInt8 enabled = [args[@"enabled"] boolValue] ? 1 : 0;
+        [DHBleCommand setMuslimCountSwitch:enabled block:^(int code, id data) {
+            [self simple:code result:result action:@"setMuslimCountEnabled"];
+        }];
+    } else if ([m isEqualToString:@"getHeartRateAlert"]) {
+        [DHBleCommand getHRAlert:^(int code, id data) {
+            [self handleCode:code result:result successBlock:^{
+                DHHRAlertModel *model = data;
+                NSMutableDictionary *config = [@{
+                    @"isOpen": @(model.isOpen),
+                    @"highThreshold": @(model.overValue)
+                } mutableCopy];
+                if (model.underValue != 0xff) {
+                    config[@"lowThreshold"] = @(model.underValue);
+                }
+                [self ok:result extra:config];
+            }];
+        }];
+    } else if ([m isEqualToString:@"setHeartRateAlert"]) {
+        DHHRAlertModel *model = [DHHRAlertModel new];
+        model.isOpen = [args[@"isOpen"] boolValue];
+        model.overValue = [args[@"highThreshold"] integerValue];
+        id lowThreshold = args[@"lowThreshold"];
+        model.underValue = [lowThreshold respondsToSelector:@selector(integerValue)]
+            ? [lowThreshold integerValue] : 0xff;
+        [DHBleCommand setHRAlert:model block:^(int code, id data) {
+            [self simple:code result:result action:@"setHeartRateAlert"];
+        }];
+    } else if ([m isEqualToString:@"getBloodOxygenAlert"]) {
+        [DHBleCommand getSP02Alert:^(int code, id data) {
+            [self handleCode:code result:result successBlock:^{
+                DHHRAlertModel *model = data;
+                [self ok:result extra:@{
+                    @"isOpen": @(model.isOpen),
+                    @"lowThreshold": @(model.overValue)
+                }];
+            }];
+        }];
+    } else if ([m isEqualToString:@"setBloodOxygenAlert"]) {
+        DHHRAlertModel *model = [DHHRAlertModel new];
+        model.isOpen = [args[@"isOpen"] boolValue];
+        model.overValue = [args[@"lowThreshold"] integerValue];
+        model.underValue = 0xff;
+        [DHBleCommand setSP02Alert:model block:^(int code, id data) {
+            [self simple:code result:result action:@"setBloodOxygenAlert"];
+        }];
     } else if ([m isEqualToString:@"getWorkoutState"]) {
         [DHBleCommand getControlSportWithRing:^(int code, id data) {
             [self handleCode:code result:result successBlock:^{
@@ -179,9 +238,19 @@
             }];
         }];
     } else if ([m isEqualToString:@"controlWorkout"]) {
+        NSInteger sportType = [args[@"sportType"] integerValue];
+        if (sportType < 7 || sportType > 161) {
+            [self fail:result code:-1 msg:@"sportType must be between 7 and 161"];
+            return;
+        }
+        NSInteger controlType = [args[@"controlType"] integerValue];
+        if (controlType < 1 || controlType > 4) {
+            [self fail:result code:-1 msg:@"controlType must be between 1 and 4"];
+            return;
+        }
         DHSportControlModel *model = [DHSportControlModel new];
-        model.sportType = [args[@"sportType"] integerValue];
-        model.controlType = [args[@"controlType"] integerValue];
+        model.sportType = sportType;
+        model.controlType = controlType;
         [DHBleCommand controlSportWithRing:model block:^(int code, id data) {
             [self simple:code result:result action:@"controlWorkout"];
         }];
@@ -195,6 +264,7 @@
     } else if ([m isEqualToString:@"syncAllHealthData"]) {
         [self startHealthSync:result];
     } else if ([m isEqualToString:@"removeHealthDataCallback"]) {
+        self.forwardHealthSyncEvents = NO;
         [self ok:result extra:nil];
     } else if ([m isEqualToString:@"unbind"]) {
         [DHBleCentralManager setBindedStatus:NO];
@@ -204,8 +274,11 @@
         [DHBleCommand controlCamera:[args[@"state"] integerValue] block:^(int code, id data) {
             [self simple:code result:result action:@"controlTakePhoto"];
         }];
+    } else if ([m isEqualToString:@"controlPhone"]) {
+        // iOS SDK 未暴露来电控制命令；系统通话控制由 iOS 自身处理。
+        [self ok:result extra:nil];
     }
-    // ---- 全天检测（6 项）----
+    // ---- 全天检测（8 项）----
     else if ([m isEqualToString:@"getTimedHeartRate"]) { [self timedGet:@"hr" result:result]; }
     else if ([m isEqualToString:@"setTimedHeartRate"]) { [self timedSet:@"hr" args:args result:result]; }
     else if ([m isEqualToString:@"getTimedBloodOxygen"]) { [self timedGet:@"bo" result:result]; }
@@ -218,6 +291,10 @@
     else if ([m isEqualToString:@"setTimedBloodSugar"]) { [self timedSet:@"sugar" args:args result:result]; }
     else if ([m isEqualToString:@"getTimedBloodPressure"]) { [self timedGet:@"bp" result:result]; }
     else if ([m isEqualToString:@"setTimedBloodPressure"]) { [self timedSet:@"bp" args:args result:result]; }
+    else if ([m isEqualToString:@"getTimedBodyTemperature"]) { [self timedGet:@"temp" result:result]; }
+    else if ([m isEqualToString:@"setTimedBodyTemperature"]) { [self timedSet:@"temp" args:args result:result]; }
+    else if ([m isEqualToString:@"getTimedPPG"]) { [self timedGet:@"ppg" result:result]; }
+    else if ([m isEqualToString:@"setTimedPPG"]) { [self timedSet:@"ppg" args:args result:result]; }
     // ---- 闹钟 ----
     else if ([m isEqualToString:@"getAlarm"]) {
         [DHBleCommand getAlarms:^(int code, id data) {
@@ -235,7 +312,6 @@
             model.isOpen = [item[@"isOpen"] boolValue];
             model.hour = [item[@"startHour"] integerValue];
             model.minute = [item[@"startMin"] integerValue];
-            model.alarmType = [self stringValue:item[@"alarmTag"]];
             model.jlAlarmId = [item[@"alarmId"] unsignedCharValue];
             model.repeats = item[@"repeats"] ?: @[@0, @0, @0, @0, @0, @0, @0];
             [alarms addObject:model];
@@ -374,6 +450,77 @@
             [self simple:code result:result action:@"setAlarmVibrationDuration"];
         }];
     }
+    else if ([m isEqualToString:@"getVibrationInterval"]) {
+        [DHBleCommand getVibrationInterval:^(int code, id data) {
+            [self handleCode:code result:result successBlock:^{
+                [self ok:result extra:@{@"intervalMs": @([data integerValue])}];
+            }];
+        }];
+    }
+    else if ([m isEqualToString:@"setVibrationInterval"]) {
+        [DHBleCommand setVibrationInterval:[args[@"intervalMs"] unsignedShortValue] block:^(int code, id data) {
+            [self simple:code result:result action:@"setVibrationInterval"];
+        }];
+    }
+    else if ([m isEqualToString:@"startHeartRateCalibration"]) {
+        __block BOOL replied = NO;
+        [DHBleCommand startFactoryTest:0x15 block:^(int code, id data) {
+            if (code != 0) {
+                if (!replied) {
+                    replied = YES;
+                    [self fail:result code:code msg:@"startHeartRateCalibration failed"];
+                }
+                return;
+            }
+            if ([data isKindOfClass:[NSDictionary class]]) {
+                NSDictionary *factoryResult = (NSDictionary *)data;
+                [self fire:@"rwfit:heartRateCalibration" data:@{
+                    @"testMode": factoryResult[@"testMode"] ?: @0,
+                    @"result": factoryResult[@"result"] ?: @0
+                }];
+            }
+            if (!replied) {
+                replied = YES;
+                [self ok:result extra:nil];
+            }
+        }];
+    }
+    else if ([m isEqualToString:@"getFallDetect"]) {
+        [DHBleCommand getFallDetect:^(int code, id data) {
+            [self handleCode:code result:result successBlock:^{
+                [self ok:result extra:@{@"enabled": @([data integerValue] == 1)}];
+            }];
+        }];
+    }
+    else if ([m isEqualToString:@"setFallDetect"]) {
+        UInt8 enabled = [args[@"enabled"] boolValue] ? 1 : 0;
+        [DHBleCommand setFallDetect:enabled block:^(int code, id data) {
+            [self simple:code result:result action:@"setFallDetect"];
+        }];
+    }
+    else if ([m isEqualToString:@"getCountReminderInterval"]) {
+        [DHBleCommand getCountReminderInterval:^(int code, id data) {
+            [self handleCode:code result:result successBlock:^{
+                [self ok:result extra:@{@"intervalMinutes": @([data integerValue])}];
+            }];
+        }];
+    }
+    else if ([m isEqualToString:@"setCountReminderInterval"]) {
+        [DHBleCommand setCountReminderInterval:[args[@"intervalMinutes"] unsignedCharValue] block:^(int code, id data) {
+            [self simple:code result:result action:@"setCountReminderInterval"];
+        }];
+    }
+    // ---- 传感器原始数据 ----
+    else if ([m isEqualToString:@"controlSensorRaw"]) {
+        UInt8 outputType = [args[@"enabled"] boolValue] ? 1 : 2;
+        UInt8 sensorType = [args[@"sensorType"] unsignedCharValue];
+        [DHBleCommand ringControlSensorRaw:outputType type:sensorType block:^(int code, id data) {
+            [self simple:code result:result action:@"controlSensorRaw"];
+        }];
+    }
+    else if ([m isEqualToString:@"getSensorRawHistory"]) {
+        [self getSensorRawHistory:result];
+    }
     // ---- 通知开关（iOS 专用 ANCS）----
     else if ([m isEqualToString:@"setNotificationSwitch"]) {
         DHAncsSetModel *md = [DHAncsSetModel new];
@@ -404,6 +551,7 @@
 
 - (void)connectDevice:(NSDictionary *)args result:(FlutterResult)result {
     self.scanning = NO;
+    [self cancelScanTimeout];
     [DHBleCentralManager stopScan];
     NSString *mac = [self stringValue:args[@"mac"]];
     NSString *uuid = [self stringValue:args[@"uuid"]];
@@ -440,6 +588,7 @@
 
 - (void)centralManagerDidConnectPeripheral:(CBPeripheral *)peripheral {
     self.scanning = NO;
+    [self cancelScanTimeout];
     [self fire:@"rwfit:connectState" data:[self connectStatePayload:@"connected" peripheral:peripheral extra:nil]];
 }
 
@@ -456,11 +605,13 @@
 
 - (void)centralManagerDidDisconnectPeripheral:(CBPeripheral *)peripheral {
     self.scanning = NO;
+    [self cancelScanTimeout];
     [self fire:@"rwfit:connectState" data:[self connectStatePayload:@"disconnected" peripheral:peripheral extra:nil]];
 }
 
 - (void)centralManagerDidFailedPeripheral:(CBPeripheral *)peripheral {
     self.scanning = NO;
+    [self cancelScanTimeout];
     [self fire:@"rwfit:connectState" data:[self connectStatePayload:@"failed" peripheral:peripheral extra:@{@"reason": @"unknown"}]];
 }
 
@@ -536,11 +687,29 @@
     NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
     [center addObserver:self selector:@selector(handleMeasureValue:)
                    name:BluetoothNotificationHealthRingMeasureValueChange object:nil];
+    [center addObserver:self selector:@selector(handleMeasureState:)
+                   name:BluetoothNotificationHealthRingMeasureStateChange object:nil];
     [center addObserver:self selector:@selector(handleCameraTakePicture:)
                    name:BluetoothNotificationCameraTakePicture object:nil];
     [center addObserver:self selector:@selector(handleWorkoutRealtimeData:)
                    name:BluetoothNotificationRingRuningData object:nil];
+    [center addObserver:self selector:@selector(handleTouchEvent:)
+                   name:BluetoothNotificationTouchEvent object:nil];
+    [center addObserver:self selector:@selector(handleSensorRawData:)
+                   name:BluetoothNotificationSensorRawData object:nil];
+    [center addObserver:self selector:@selector(handleSensorRawStopped:)
+                   name:BluetoothNotificationHealthRingSenorStopChange object:nil];
+    [center addObserver:self selector:@selector(handleHealthAlert:)
+                   name:BluetoothNotificationRingHealthOverAlert object:nil];
     self.observersRegistered = YES;
+}
+
+- (void)handleMeasureState:(NSNotification *)notification {
+    NSNumber *ringMeasure = [notification.userInfo[@"ringMeasure"] isKindOfClass:[NSNumber class]]
+        ? notification.userInfo[@"ringMeasure"] : nil;
+    if (ringMeasure != nil && [ringMeasure integerValue] == 0) {
+        [self fire:@"rwfit:realtimeMeasureComplete" data:@{}];
+    }
 }
 
 - (void)handleMeasureValue:(NSNotification *)notification {
@@ -558,8 +727,9 @@
     }
     NSMutableDictionary *event = [NSMutableDictionary dictionary];
     event[@"dataType"] = @(dataType);
-    // iOS 通知无时间戳，桥接层补当前时间（毫秒，与 Dart timestampMs 对齐）
-    event[@"time"] = @((long long)([[NSDate date] timeIntervalSince1970] * 1000));
+    NSNumber *timestamp = [userInfo[@"timestamp"] isKindOfClass:[NSNumber class]]
+        ? userInfo[@"timestamp"] : nil;
+    event[@"time"] = timestamp ?: @((long long)[[NSDate date] timeIntervalSince1970]);
     if (dataType == 4) {
         event[@"dataValue"] = userInfo[@"systolic"] ?: @0;
         event[@"diastolic"] = userInfo[@"diastolic"] ?: @0;
@@ -581,31 +751,66 @@
         @"distance": data[@"ActivityDistance"] ?: @0,
         @"calorie": data[@"ActivityCalorie"] ?: @0,
         @"heartRate": data[@"ActivityHr"] ?: @0,
-        @"dataType": data[@"ActivityDataType"] ?: @(-1)
+        // 对 Flutter 固定为统一的实时运动数据类型；原生 key 仅供 iOS 内部判断。
+        @"dataType": @(0x0223)
     }];
 }
 
-#pragma mark - 全天检测（6 项共用）
+- (void)handleTouchEvent:(NSNotification *)notification {
+    NSDictionary *data = notification.userInfo ?: @{};
+    NSInteger keyType = [data[@"keyType"] integerValue];
+    NSInteger touchType = [data[@"touchType"] integerValue];
+    [self fire:@"rwfit:touchEvent" data:@{
+        @"keyType": @(keyType),
+        @"touchType": @(touchType),
+        @"action": [self touchActionForKeyType:keyType touchType:touchType]
+    }];
+}
+
+- (void)handleSensorRawData:(NSNotification *)notification {
+    [self fire:@"rwfit:sensorRawData" data:[self sensorRawDictionary:notification.userInfo ?: @{}]];
+}
+
+- (void)handleSensorRawStopped:(NSNotification *)notification {
+    // iOS 原生通知不携带停止原因；统一结构中 0 表示未知。
+    [self fire:@"rwfit:sensorRawStopped" data:@{@"reason": @0}];
+}
+
+- (void)handleHealthAlert:(NSNotification *)notification {
+    NSDictionary *data = notification.userInfo ?: @{};
+    [self fire:@"rwfit:healthAlert" data:@{
+        @"type": data[@"type"] ?: @(-1),
+        @"value": data[@"value"] ?: @0
+    }];
+}
+
+- (void)dealloc {
+    [self cancelScanTimeout];
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
+
+#pragma mark - 全天检测（8 项共用）
 
 - (void)modeReply:(int)code data:(id)data result:(FlutterResult)result {
     [self handleCode:code result:result successBlock:^{
         [self ok:result extra:@{
             @"isOpen": @([[data valueForKey:@"isOpen"] boolValue]),
             @"duration": [data valueForKey:@"interval"] ?: @0,
-            @"startHour": [data valueForKey:@"startHour"] ?: @0,
-            @"startMin": [data valueForKey:@"startMinute"] ?: @0,
-            @"endHour": [data valueForKey:@"endHour"] ?: @0,
-            @"endMin": [data valueForKey:@"endMinute"] ?: @0
+            @"startHour": @0,
+            @"startMin": @0,
+            @"endHour": @23,
+            @"endMin": @59
         }];
     }];
 }
 
 - (void)fillTimedModel:(id)model args:(NSDictionary *)args {
     [model setValue:@([args[@"isOpen"] boolValue]) forKey:@"isOpen"];
-    [model setValue:@([args[@"startHour"] integerValue]) forKey:@"startHour"];
-    [model setValue:@([args[@"startMin"] integerValue]) forKey:@"startMinute"];
-    [model setValue:@([args[@"endHour"] integerValue]) forKey:@"endHour"];
-    [model setValue:@([args[@"endMin"] integerValue]) forKey:@"endMinute"];
+    // 全天检测协议固定为 00:00–23:59，不透传调用方自定义时段。
+    [model setValue:@0 forKey:@"startHour"];
+    [model setValue:@0 forKey:@"startMinute"];
+    [model setValue:@23 forKey:@"endHour"];
+    [model setValue:@59 forKey:@"endMinute"];
     [model setValue:@([args[@"duration"] integerValue]) forKey:@"interval"];
 }
 
@@ -617,6 +822,8 @@
     else if ([type isEqualToString:@"stress"]) { [DHBleCommand getStressMode:blk]; }
     else if ([type isEqualToString:@"sugar"]) { [DHBleCommand getBloodSugarMode:blk]; }
     else if ([type isEqualToString:@"bp"]) { [DHBleCommand getBpMode:blk]; }
+    else if ([type isEqualToString:@"temp"]) { [DHBleCommand getTimedBodyTemperature:blk]; }
+    else if ([type isEqualToString:@"ppg"]) { [DHBleCommand getPPGMode:blk]; }
 }
 
 - (void)timedSet:(NSString *)type args:(NSDictionary *)args result:(FlutterResult)result {
@@ -639,6 +846,12 @@
     } else if ([type isEqualToString:@"bp"]) {
         DHBpModeSetModel *md = [DHBpModeSetModel new]; [self fillTimedModel:md args:args];
         [DHBleCommand setBpMode:md block:blk];
+    } else if ([type isEqualToString:@"temp"]) {
+        DHHeartRateModeSetModel *md = [DHHeartRateModeSetModel new]; [self fillTimedModel:md args:args];
+        [DHBleCommand setTimedBodyTemperature:md block:blk];
+    } else if ([type isEqualToString:@"ppg"]) {
+        DHHrvModeSetModel *md = [DHHrvModeSetModel new]; [self fillTimedModel:md args:args];
+        [DHBleCommand setPPGMode:md block:blk];
     }
 }
 
@@ -650,13 +863,55 @@
         @"startHour": @([item hour]),
         @"startMin": @([item minute]),
         @"isOpen": @([item isOpen]),
-        @"alarmTag": item.alarmType ?: @"",
         @"repeats": item.repeats ?: @[]
     };
 }
 
 - (NSDictionary *)ledDictionary:(DHLedLightSetModel *)model {
     return @{@"isOpen": @([model isOpen]), @"lcdLevel": @([model lightLevel])};
+}
+
+- (NSString *)touchActionForKeyType:(NSInteger)keyType touchType:(NSInteger)touchType {
+    if (keyType == 2) return @"fallDetected";
+    if (keyType != 1) return @"unknown";
+    switch (touchType) {
+        case 1: return @"singleTap";
+        case 2: return @"doubleTap";
+        case 3: return @"tripleTap";
+        case 4: return @"longPress";
+        case 5: return @"swing";
+        default: return @"unknown";
+    }
+}
+
+- (NSArray *)arrayValue:(id)value {
+    return [value isKindOfClass:[NSArray class]] ? value : @[];
+}
+
+- (NSDictionary *)sensorRawDictionary:(NSDictionary *)raw {
+    NSNumber *type = raw[@"sensorType"] ?: raw[@"type"] ?: @(-1);
+    NSMutableDictionary *packet = [@{
+        @"type": type,
+        @"ppg": [self arrayValue:raw[@"ppgData"]],
+        @"acc": [self arrayValue:raw[@"accData"]],
+        @"ppgRed": [self arrayValue:raw[@"ppgRedData"]],
+        @"ir": [self arrayValue:raw[@"irData"]],
+        @"sleep": @[]
+    } mutableCopy];
+    if (raw[@"sequence"] != nil) packet[@"sequence"] = raw[@"sequence"];
+    if (raw[@"timestamp"] != nil) packet[@"timestampSec"] = raw[@"timestamp"];
+
+    NSMutableArray *sleep = [NSMutableArray array];
+    for (id item in [self arrayValue:raw[@"sleepData"]]) {
+        if (![item isKindOfClass:[NSDictionary class]]) continue;
+        NSDictionary *sample = (NSDictionary *)item;
+        [sleep addObject:@{
+            @"timestampSec": sample[@"timestamp"] ?: sample[@"timestampSec"] ?: @0,
+            @"mode": sample[@"mode"] ?: @0
+        }];
+    }
+    packet[@"sleep"] = sleep;
+    return packet;
 }
 
 #pragma mark - 多运动报告
@@ -683,6 +938,34 @@
         for (id item in (NSArray *)data) {
             if ([item isKindOfClass:[DHDailySportModel class]]) {
                 [reports addObject:[self workoutReportDictionary:(DHDailySportModel *)item]];
+            }
+        }
+    }];
+}
+
+- (void)getSensorRawHistory:(FlutterResult)result {
+    __block NSMutableArray *packets = [NSMutableArray array];
+    __block BOOL replied = NO;
+    [DHBleCommand ringGetHistorySensorRaw:^(int code, id data) {
+        if (replied) return;
+        replied = YES;
+        if (code == 0) {
+            [self ok:result extra:@{@"data": packets}];
+        } else {
+            [self fail:result code:code msg:@"getSensorRawHistory failed"];
+        }
+    } dataBlock:^(int code, int progress, id data) {
+        (void)progress;
+        if (replied) return;
+        if (code != 0) {
+            replied = YES;
+            [self fail:result code:code msg:@"getSensorRawHistory failed"];
+            return;
+        }
+        if (![data isKindOfClass:[NSArray class]]) return;
+        for (id item in (NSArray *)data) {
+            if ([item isKindOfClass:[NSDictionary class]]) {
+                [packets addObject:[self sensorRawDictionary:(NSDictionary *)item]];
             }
         }
     }];
@@ -750,18 +1033,23 @@
 #pragma mark - 健康数据同步
 
 - (void)startHealthSync:(FlutterResult)result {
+    self.forwardHealthSyncEvents = YES;
     [DHBleCommand startDataSyncing:^(int code, id data) {
+        if (!self.forwardHealthSyncEvents) return;
         if (code == 0) {
+            // Android 原生仅在同步完成时回调 progress=100。iOS dataBlock 的
+            // progress 是数据类型区分码，不能作为百分比透传；完成时统一发 100。
+            [self fire:@"rwfit:syncProgress" data:@{@"progress": @100}];
             [self fire:@"rwfit:syncFinish" data:@{}];
         } else {
             [self fire:@"rwfit:syncError" data:@{@"code": @(code)}];
         }
     } datablcok:^(int code, int progress, id data) {
+        if (!self.forwardHealthSyncEvents) return;
         if (code != 0) {
             [self fire:@"rwfit:syncError" data:@{@"code": @(code)}];
             return;
         }
-        [self fire:@"rwfit:syncProgress" data:@{@"progress": @(progress)}];
         if ([data isKindOfClass:[NSArray class]]) {
             NSDictionary *grouped = [self groupedSyncPayload:(NSArray *)data];
             for (NSString *type in grouped) {
@@ -806,20 +1094,29 @@
     return @0;
 }
 
+- (NSNumber *)numberFromMeasurement:(id)value {
+    if ([value isKindOfClass:[NSNumber class]]) return value;
+    if ([value isKindOfClass:[NSString class]]) return @([(NSString *)value doubleValue]);
+    return @0;
+}
+
 - (NSDictionary *)stepDictFromModel:(id)model {
     NSArray *rawItems = [model valueForKey:@"items"];
     if (![rawItems isKindOfClass:[NSArray class]]) rawItems = @[];
     NSMutableArray *items = [NSMutableArray array];
     for (NSDictionary *it in rawItems) {
         if (![it isKindOfClass:[NSDictionary class]]) continue;
-        [items addObject:@{@"index": it[@"index"] ?: @0, @"steps": it[@"step"] ?: @0,
+        [items addObject:@{@"time": [self numberFromTimestamp:it[@"timestamp"]],
+            @"index": it[@"index"] ?: @0, @"steps": it[@"step"] ?: @0,
             @"calorie": it[@"calorie"] ?: @0, @"distance": it[@"distance"] ?: @0}];
     }
     return @{@"time": [self numberFromTimestamp:[model valueForKey:@"timestamp"]],
         @"date": [self stringValue:[model valueForKey:@"date"]],
         @"totalSteps": @([[model valueForKey:@"step"] integerValue]),
         @"totalCalorie": @([[model valueForKey:@"calorie"] integerValue]),
-        @"totalDistance": @([[model valueForKey:@"distance"] integerValue]), @"items": items};
+        @"totalDistance": @([[model valueForKey:@"distance"] integerValue]),
+        @"activityDataInterval": @([[model valueForKey:@"activityDataInterval"] integerValue]),
+        @"items": items};
 }
 
 - (NSDictionary *)sleepDictFromModel:(id)model {
@@ -843,7 +1140,8 @@
     NSMutableArray *items = [NSMutableArray array];
     for (NSDictionary *it in rawItems) {
         if (![it isKindOfClass:[NSDictionary class]]) continue;
-        [items addObject:@{@"time": [self numberFromTimestamp:it[@"timestamp"]], itemKey: it[@"value"] ?: @0}];
+        [items addObject:@{@"time": [self numberFromTimestamp:it[@"timestamp"]],
+            itemKey: [self numberFromMeasurement:it[@"value"]]}];
     }
     return @{@"time": [self numberFromTimestamp:[model valueForKey:@"timestamp"]],
         @"date": [self stringValue:[model valueForKey:@"date"]], @"items": items};
@@ -937,7 +1235,28 @@
 }
 
 - (NSDictionary *)supportMenuDictionary:(DeviceFuncV2Model *)model {
+    NSInteger activityDataInterval = model.activityDataInterval > 0 ? model.activityDataInterval : 60;
+    // Flutter 两端统一暴露 HR 与 SpO2 两个独立能力字段。iOS SDK 当前仅
+    // 提供一个合并开关，因此先把同一个值分别赋给两个字段；以后原生提供
+    // 独立能力时，只需替换各自来源，不改变 Flutter 契约。
+    BOOL supportsHrSpO2Alert = model.isSupportHrSp02Alert != 0;
+    BOOL supportsHrReminder = supportsHrSpO2Alert;
+    BOOL supportsBoReminder = supportsHrSpO2Alert;
     return @{
+        @"isPushMsgEnableSwitch": @([model isPushMsgEnableSwitch]),
+        @"pushMsgSwitchValue": @(model.pushMsgSwitchValue),
+        @"pushMsgSwitchValue2": @(model.pushMsgSwitchValue2),
+        @"activityDataInterval": @(activityDataInterval),
+        @"isAlarm": @([model isAlarm]),
+        @"isBrightScreenSleepTime": @([model isBackLightSleepMode]),
+        @"isBrightScreenTime": @([model isBackLight]),
+        @"isSupportWorkout": @([model isSupportWorkout3]),
+        @"isRememberSwitch": @([model isSupportMuslimCountSwitch]),
+        @"isSupportHrReminder": @(supportsHrReminder),
+        @"isSupportBoReminder": @(supportsBoReminder),
+        @"isSupportMotoVibrationLevel": @([model isSupportMotoVibrationLevel]),
+        @"isSupportAlarmVibrationDuration": @([model isSupportAlarmVibrationDuration]),
+        @"isSupportVibrationInterval": @([model isSupportVibrationInterval]),
         @"isStep": @([model isDataTypeActivity]),
         @"isSleep": @([model isDataTypeSleep]),
         @"isHr": @([model isDataTypeHeart]),
@@ -946,19 +1265,54 @@
         @"isBloodSugar": @([model isDataTypeBloodSugar]),
         @"isHrv": @([model isDataTypeHRV]),
         @"isPressure": @([model isDataTypeStress]),
-        @"isBodyTemp": @NO,
-        @"isAlarm": @([model isAlarm]),
-        @"isBrightScreenTime": @([model isBackLight]),
-        @"isBrightScreenSleepTime": @([model isBackLightSleepMode]),
-        @"isPushMsgEnableSwitch": @([model isPushMsgEnableSwitch]),
+        @"isMuslimCountData": @([model isDataTypeMuslimCount]),
+        @"isBodyTemp": @([model isDataTypeTemperature]),
+        @"isSupportMuslimTimeDisplayMode": @([model isSupportMuslimTimeDisplayMode]),
+        @"isSupportSensorRawPPG": @([model isSupportSensorRawPPG]),
+        @"isSupportPPGMonitoring": @([model isSupportPPGMonitoring]),
+        @"isSupportTemperatureMonitoring": @([model isSupportTemperatureMonitoring]),
+        @"isSupportCountReminder": @([model isSupportCountReminder]),
+        @"isSupportSensorRawACC": @([model isSupportSensorRawACC]),
+        @"isSupportSensorRawPPGRed": @([model isSupportSensorRawPPGRed]),
+        @"isSupportSensorRawIR": @([model isSupportSensorRawIR]),
+        @"isSupportSensorRawSleep": @([model isSupportSensorRawSleep]),
+        @"isSupportFallDetect": @([model isSupportFallDetect]),
+        @"isSupportRecording": @([model isSupportRecording]),
         @"isFindDevice": @([model isFindDevice]),
         @"isTakePhoto": @([model isTakePhoto]),
-        @"isSupportMotoVibrationLevel": @([model isSupportMotoVibrationLevel]),
-        @"isSupportAlarmVibrationDuration": @([model isSupportAlarmVibrationDuration]),
-        @"isMuslimCountData": @([model isDataTypeMuslimCount]),
-        @"isSupportMuslimTimeDisplayMode": @([model isSupportMuslimTimeDisplayMode]),
-        @"isSupportWorkout": @([model isSupportWorkout3])
+        @"isLedLight": @([model isLEDLight]),
+        @"isWearDirection": @([model isWearDir]),
+        @"isVideoHid": @([model isVideoHid]),
+        @"isVideoHidBook": @([model isVideoHidBook]),
+        @"isVideoHidMusic": @([model isVideoHidMusic]),
+        @"isRaiseBrightScreen": @([model isSupportRaisescreen]),
+        @"isPowerOff": @([model isPowerOff]),
+        @"isFactoryReset": @([model isResetFactory]),
+        @"isPushMessage": @([model isPushMsg])
     };
+}
+
+#pragma mark - 扫描超时
+
+- (void)cancelScanTimeout {
+    [self.scanTimeoutTimer invalidate];
+    self.scanTimeoutTimer = nil;
+}
+
+- (void)scanDidTimeout:(NSTimer *)timer {
+    (void)timer;
+    [self finishScanIfNeeded];
+}
+
+- (void)finishScanIfNeeded {
+    if (!self.scanning) {
+        [self cancelScanTimeout];
+        return;
+    }
+    self.scanning = NO;
+    [self cancelScanTimeout];
+    [DHBleCentralManager stopScan];
+    [self fire:@"rwfit:scanFinish" data:@{}];
 }
 
 @end

@@ -31,8 +31,8 @@ class RwfitBle {
 
   // ==================== 扫描 ====================
 
-  Future<void> startScan({bool filter = true}) =>
-      callAsync('startScan', {'filter': filter});
+  /// 开始扫描支持的设备；两端均在 10 秒后自动结束。
+  Future<void> startScan() => callAsync('startScan');
 
   Future<void> stopScan() => callAsync('stopScan');
 
@@ -40,9 +40,6 @@ class RwfitBle {
       onEvent(RwfitEvents.scanResult).map(BleDevice.fromMap);
 
   Stream<void> get onScanFinish => onEvent(RwfitEvents.scanFinish).map((_) {});
-
-  Stream<Map<String, dynamic>> get onScanError =>
-      onEvent(RwfitEvents.scanError);
 
   // ==================== 连接 ====================
 
@@ -90,7 +87,7 @@ class RwfitBle {
   Future<void> setRingBtName(String name) =>
       callAsync('setRingBtName', {'name': name});
 
-  // ==================== 全天检测（6 项共用 TimedConfig）====================
+  // =============== 7 项全天健康检测 + PPG（共用 TimedConfig）===============
 
   Future<TimedConfig> getTimedHeartRate() async =>
       TimedConfig.fromMap(await callAsync('getTimedHeartRate'));
@@ -122,6 +119,16 @@ class RwfitBle {
   Future<void> setTimedBloodPressure(TimedConfig c) =>
       callAsync('setTimedBloodPressure', c.toMap());
 
+  Future<TimedConfig> getTimedBodyTemperature() async =>
+      TimedConfig.fromMap(await callAsync('getTimedBodyTemperature'));
+  Future<void> setTimedBodyTemperature(TimedConfig c) =>
+      callAsync('setTimedBodyTemperature', c.toMap());
+
+  Future<TimedConfig> getTimedPPG() async =>
+      TimedConfig.fromMap(await callAsync('getTimedPPG'));
+  Future<void> setTimedPPG(TimedConfig c) =>
+      callAsync('setTimedPPG', c.toMap());
+
   // ==================== 实时测量 ====================
 
   /// 同一时间只能开启一种；切换前先 [stopRealtimeMeasure]。
@@ -134,6 +141,10 @@ class RwfitBle {
   Stream<RealtimeData> get onRealtimeData =>
       onEvent(RwfitEvents.healthData).map(RealtimeData.fromMap);
 
+  /// 当前单次实时测量完成。应在 [startRealtimeMeasure] 前订阅。
+  Stream<void> get onRealtimeMeasureComplete =>
+      onEvent(RwfitEvents.realtimeMeasureComplete).map<void>((_) {});
+
   // ==================== 多运动 ====================
 
   /// 查询设备当前运动类型和控制状态。开始新运动前应先调用。
@@ -142,6 +153,9 @@ class RwfitBle {
 
   /// 开始/继续/暂停/结束多运动。两端统一只返回成功或失败。
   Future<void> controlWorkout(int sportType, WorkoutControlType controlType) {
+    if (sportType < 7 || sportType > 161) {
+      throw RangeError.range(sportType, 7, 161, 'sportType');
+    }
     if (controlType == WorkoutControlType.unknown) {
       throw ArgumentError.value(controlType, 'controlType', '不能发送 unknown');
     }
@@ -182,6 +196,107 @@ class RwfitBle {
   /// 拍照触发 / 物理键 / 音乐控制统一从这里来（按 action 区分）。
   Stream<TouchEvent> get onTouchEvent =>
       onEvent(RwfitEvents.touchEvent).map(TouchEvent.fromMap);
+
+  /// 来电控制是平台系统能力；当前仅 Android 原生 SDK 支持。
+  Future<void> controlPhone(CallControlAction action) =>
+      callAsync('controlPhone', {'action': action.commandValue});
+
+  /// 设备发起的接听/拒接动作；当前仅 Android 上报。
+  Stream<CallControlEvent> get onCallControl =>
+      onEvent(RwfitEvents.callControl).map(CallControlEvent.fromMap);
+
+  Future<bool> getMuslimCountEnabled() async =>
+      (await callAsync('getMuslimCountEnabled'))['enabled'] as bool;
+
+  Future<void> setMuslimCountEnabled(bool enabled) =>
+      callAsync('setMuslimCountEnabled', {'enabled': enabled});
+
+  Future<HeartRateAlertConfig> getHeartRateAlert() async =>
+      HeartRateAlertConfig.fromMap(await callAsync('getHeartRateAlert'));
+
+  Future<void> setHeartRateAlert(HeartRateAlertConfig config) {
+    _validateAlertThreshold(config.highThreshold, 'highThreshold');
+    if (config.lowThreshold != null) {
+      _validateAlertThreshold(config.lowThreshold!, 'lowThreshold');
+    }
+    return callAsync('setHeartRateAlert', config.toMap());
+  }
+
+  Future<BloodOxygenAlertConfig> getBloodOxygenAlert() async =>
+      BloodOxygenAlertConfig.fromMap(await callAsync('getBloodOxygenAlert'));
+
+  Future<void> setBloodOxygenAlert(BloodOxygenAlertConfig config) {
+    _validateAlertThreshold(config.lowThreshold, 'lowThreshold');
+    return callAsync('setBloodOxygenAlert', config.toMap());
+  }
+
+  Stream<HealthAlertEvent> get onHealthAlert =>
+      onEvent(RwfitEvents.healthAlert).map(HealthAlertEvent.fromMap);
+
+  Future<int> getVibrationInterval() async =>
+      (await callAsync('getVibrationInterval'))['intervalMs'] as int;
+
+  Future<void> setVibrationInterval(int intervalMs) {
+    if (intervalMs < 100 || intervalMs > 1000) {
+      throw RangeError.range(intervalMs, 100, 1000, 'intervalMs');
+    }
+    return callAsync('setVibrationInterval', {'intervalMs': intervalMs});
+  }
+
+  /// 启动心率校正；过程与最终结果从 [onHeartRateCalibration] 接收。
+  Future<void> startHeartRateCalibration() =>
+      callAsync('startHeartRateCalibration');
+
+  Stream<HeartRateCalibrationResult> get onHeartRateCalibration => onEvent(
+    RwfitEvents.heartRateCalibration,
+  ).map(HeartRateCalibrationResult.fromMap);
+
+  Future<bool> getFallDetect() async =>
+      (await callAsync('getFallDetect'))['enabled'] as bool;
+
+  Future<void> setFallDetect(bool enabled) =>
+      callAsync('setFallDetect', {'enabled': enabled});
+
+  Future<int> getCountReminderInterval() async =>
+      (await callAsync('getCountReminderInterval'))['intervalMinutes'] as int;
+
+  Future<void> setCountReminderInterval(int intervalMinutes) {
+    if (!const [0, 30, 60, 90, 120].contains(intervalMinutes)) {
+      throw ArgumentError.value(
+        intervalMinutes,
+        'intervalMinutes',
+        '仅支持 0、30、60、90、120 分钟',
+      );
+    }
+    return callAsync('setCountReminderInterval', {
+      'intervalMinutes': intervalMinutes,
+    });
+  }
+
+  /// 开启或关闭 PPG/ACC/PPG Red/IR 原始数据采集。
+  Future<void> controlSensorRaw(bool enabled, SensorRawSelection selection) =>
+      callAsync('controlSensorRaw', {
+        'enabled': enabled,
+        'sensorType': selection.value,
+      });
+
+  Future<List<SensorRawPacket>> getSensorRawHistory() async {
+    final data =
+        (await callAsync('getSensorRawHistory'))['data'] as List? ?? const [];
+    return data.map((item) => SensorRawPacket.fromMap(item as Map)).toList();
+  }
+
+  Stream<SensorRawPacket> get onSensorRawData =>
+      onEvent(RwfitEvents.sensorRawData).map(SensorRawPacket.fromMap);
+
+  Stream<SensorRawStoppedEvent> get onSensorRawStopped =>
+      onEvent(RwfitEvents.sensorRawStopped).map(SensorRawStoppedEvent.fromMap);
+
+  void _validateAlertThreshold(int value, String name) {
+    if (value < 0 || value > 254) {
+      throw RangeError.range(value, 0, 254, name);
+    }
+  }
 
   // ---- 闹钟（全量下发）----
 
@@ -261,6 +376,8 @@ class RwfitBle {
   Future<void> removeHealthDataCallback() =>
       callAsync('removeHealthDataCallback');
 
+  /// 跨平台同步完成标记，当前仅发出 100；终态以 [onSyncFinish] /
+  /// [onSyncError] 为准，不应作为连续百分比进度使用。
   Stream<double> get onSyncProgress => onEvent(
     RwfitEvents.syncProgress,
   ).map((m) => (m['progress'] as num).toDouble());
@@ -299,8 +416,8 @@ class RwfitBle {
       callAsync('setNotificationSwitch', switches);
 
   /// [iOS 专用] 获取 ANCS 转发开关；Android 返回 {}。
-  Future<Map<String, dynamic>> getNotificationSwitch() async =>
-      (await callAsync('getNotificationSwitch'))['switches']
-          as Map<String, dynamic>? ??
-      const {};
+  Future<Map<String, dynamic>> getNotificationSwitch() async {
+    final switches = (await callAsync('getNotificationSwitch'))['switches'];
+    return switches is Map ? switches.cast<String, dynamic>() : const {};
+  }
 }
