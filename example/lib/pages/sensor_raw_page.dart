@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:rwfit_ble/rwfit_ble.dart';
 
 import '../support_menu.dart';
+import '../i18n.dart';
 import '../widgets/result_tile.dart';
 
 /// 原始传感器采集、历史同步及睡眠实时状态示例。
@@ -45,7 +46,10 @@ class _SensorRawPageState extends State<SensorRawPage> {
     _subs.add(
       _ring.onSensorRawStopped.listen((event) {
         _collecting = false;
-        _log('设备停止采集: reason=${event.reason}');
+        _log(
+          '${demoTr('设备停止采集', 'Device stopped collection')}: '
+          'reason=${event.reason}',
+        );
       }),
     );
   }
@@ -69,7 +73,9 @@ class _SensorRawPageState extends State<SensorRawPage> {
   Future<void> _start() async {
     final selection = _selection;
     if (selection == null) {
-      throw StateError('当前设备没有支持的原始传感器采集组合');
+      throw StateError(
+        demoTr('当前设备没有支持的原始传感器采集组合', 'No supported raw-sensor combination'),
+      );
     }
     await _ring.controlSensorRaw(true, selection);
     if (mounted) setState(() => _collecting = true);
@@ -88,11 +94,13 @@ class _SensorRawPageState extends State<SensorRawPage> {
     for (final packet in packets) {
       counts.update(packet.type, (value) => value + 1, ifAbsent: () => 1);
     }
-    return '${packets.length}包 $counts';
+    return '${packets.length} ${demoTr('包', 'packets')} $counts';
   }
 
   String _packetSummary(SensorRawPacket? packet) {
-    if (packet == null) return '尚未收到数据';
+    if (packet == null) {
+      return demoTr('尚未收到数据', 'No data received yet');
+    }
     return 'type=${packet.type.name}, seq=${packet.sequence ?? '-'}, '
         'ppg=${packet.ppg.length}, acc=${packet.acc.length}, '
         'red=${packet.ppgRed.length}, ir=${packet.ir.length}, '
@@ -123,7 +131,7 @@ class _SensorRawPageState extends State<SensorRawPage> {
       DemoCapabilityKey.sensorRawSleep,
     );
     return Scaffold(
-      appBar: AppBar(title: const Text('传感器原始数据')),
+      appBar: AppBar(title: Text(demoTr('传感器原始数据', 'Raw sensor data'))),
       body: Column(
         children: [
           Padding(
@@ -133,9 +141,9 @@ class _SensorRawPageState extends State<SensorRawPage> {
               children: [
                 DropdownButtonFormField<SensorRawSelection>(
                   initialValue: _selection,
-                  decoration: const InputDecoration(
-                    labelText: '采集组合',
-                    border: OutlineInputBorder(),
+                  decoration: InputDecoration(
+                    labelText: demoTr('采集组合', 'Sensor combination'),
+                    border: const OutlineInputBorder(),
                   ),
                   items: [
                     for (final value in supportedSelections)
@@ -160,26 +168,52 @@ class _SensorRawPageState extends State<SensorRawPage> {
                     FilledButton.tonal(
                       onPressed: _collecting || _selection == null
                           ? null
-                          : () => _run('开始采集', _start),
-                      child: Text(_selection == null ? '开始采集(不支持)' : '开始采集'),
+                          : () => _run(
+                              demoTr('开始采集', 'Start collection'),
+                              _start,
+                            ),
+                      child: Text(
+                        _selection == null
+                            ? '${demoTr('开始采集', 'Start collection')} '
+                                  '(${demoTr('不支持', 'Unsupported')})'
+                            : demoTr('开始采集', 'Start collection'),
+                      ),
                     ),
                     FilledButton.tonal(
-                      onPressed: _collecting ? () => _run('停止采集', _stop) : null,
-                      child: const Text('停止采集'),
+                      onPressed: _collecting
+                          ? () => _run(demoTr('停止采集', 'Stop collection'), _stop)
+                          : null,
+                      child: Text(demoTr('停止采集', 'Stop collection')),
                     ),
                     FilledButton.tonal(
                       onPressed: supportsHistory
-                          ? () => _run('历史原始数据', _history)
+                          ? () => _run(
+                              demoTr('历史原始数据', 'Raw data history'),
+                              _history,
+                            )
                           : null,
-                      child: Text(supportsHistory ? '同步历史数据' : '同步历史数据(不支持)'),
+                      child: Text(
+                        supportsHistory
+                            ? demoTr('同步历史数据', 'Sync history')
+                            : '${demoTr('同步历史数据', 'Sync history')} '
+                                  '(${demoTr('不支持', 'Unsupported')})',
+                      ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 12),
-                Text('实时包数: $_packetCount'),
+                Text('${demoTr('实时包数', 'Live packets')}: $_packetCount'),
                 Text(_packetSummary(_latestPacket)),
                 Text(
-                  supportsSleep ? '睡眠状态由设备自动推送，无需启动采集。' : '当前设备不支持睡眠原始数据。',
+                  supportsSleep
+                      ? demoTr(
+                          '睡眠状态由设备自动推送，无需启动采集。',
+                          'Sleep state is pushed automatically; collection is not required.',
+                        )
+                      : demoTr(
+                          '当前设备不支持睡眠原始数据。',
+                          'Raw sleep data is not supported.',
+                        ),
                   style: const TextStyle(color: Colors.blueGrey),
                 ),
               ],

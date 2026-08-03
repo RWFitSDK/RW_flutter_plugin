@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:rwfit_ble/rwfit_ble.dart';
 
 import '../widgets/result_tile.dart';
+import '../i18n.dart';
 
 /// 设备信息页：电量 / 固件版本 / 设置用户信息 / 时间格式。
 class DeviceInfoPage extends StatefulWidget {
@@ -31,7 +32,7 @@ class _DeviceInfoPageState extends State<DeviceInfoPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('设备信息')),
+      appBar: AppBar(title: Text(demoTr('设备信息', 'Device info'))),
       body: Column(
         children: [
           Wrap(
@@ -39,35 +40,59 @@ class _DeviceInfoPageState extends State<DeviceInfoPage> {
             runSpacing: 8,
             children: [
               _btn(
-                '获取电量',
-                () => _run('电量', () async {
+                demoTr('获取电量', 'Get battery'),
+                () => _run(demoTr('电量', 'Battery'), () async {
                   final p = await _ring.getPower();
                   return '$p%';
                 }),
               ),
               _btn(
-                '固件版本',
-                () => _run('固件', () async {
+                demoTr('固件版本', 'Firmware version'),
+                () => _run(demoTr('固件', 'Firmware'), () async {
                   final f = await _ring.getFirmwareVersion();
                   return '${f.deviceClazz} / ${f.deviceNo} / UI:${f.uiVersion}';
                 }),
               ),
-              _btn('SDK版本', () => _run('SDK版本', () => _ring.getSdkVersion())),
-              _btn('插件版本', () => _run('插件版本', () => _ring.getPluginVersion())),
               _btn(
-                '设置用户信息',
+                demoTr('SDK版本', 'SDK version'),
                 () => _run(
-                  '用户信息',
+                  demoTr('SDK版本', 'SDK version'),
+                  () => _ring.getSdkVersion(),
+                ),
+              ),
+              _btn(
+                demoTr('插件版本', 'Plugin version'),
+                () => _run(
+                  demoTr('插件版本', 'Plugin version'),
+                  () => _ring.getPluginVersion(),
+                ),
+              ),
+              _btn(
+                demoTr('设置用户信息', 'Set user info'),
+                () => _run(
+                  demoTr('用户信息', 'User info'),
                   () => _ring.setUserInfo(
                     const UserInfo(gender: 1, age: 25, height: 175, weight: 70),
                   ),
                 ),
               ),
-              _btn('设12小时制', () => _run('时间格式', () => _ring.setTimeFormat(0))),
-              _btn('设24小时制', () => _run('时间格式', () => _ring.setTimeFormat(1))),
               _btn(
-                '功能列表',
-                () => _run('功能列表', () async {
+                demoTr('设12小时制', 'Use 12-hour time'),
+                () => _run(
+                  demoTr('时间格式', 'Time format'),
+                  () => _ring.setTimeFormat(0),
+                ),
+              ),
+              _btn(
+                demoTr('设24小时制', 'Use 24-hour time'),
+                () => _run(
+                  demoTr('时间格式', 'Time format'),
+                  () => _ring.setTimeFormat(1),
+                ),
+              ),
+              _btn(
+                demoTr('功能列表', 'Capabilities'),
+                () => _run(demoTr('功能列表', 'Capabilities'), () async {
                   final m = await _ring.getFunctionList();
                   return m['supportMenu']?.toString() ?? m.toString();
                 }),

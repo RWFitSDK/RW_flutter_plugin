@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../i18n.dart';
+
 /// 统一展示操作结果日志的列表组件。
 class ResultList extends StatelessWidget {
   const ResultList({super.key, required this.results});
@@ -8,8 +10,11 @@ class ResultList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (results.isEmpty) {
-      return const Center(
-        child: Text('暂无结果', style: TextStyle(color: Colors.grey)),
+      return Center(
+        child: Text(
+          demoTr('暂无结果', 'No results yet'),
+          style: const TextStyle(color: Colors.grey),
+        ),
       );
     }
     return ListView.builder(

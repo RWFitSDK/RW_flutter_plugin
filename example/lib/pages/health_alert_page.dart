@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:rwfit_ble/rwfit_ble.dart';
 
 import '../support_menu.dart';
+import '../i18n.dart';
 import '../widgets/result_tile.dart';
 
 /// 赞念开关与心率/血氧报警配置示例。
@@ -25,7 +26,10 @@ class _HealthAlertPageState extends State<HealthAlertPage> {
   void initState() {
     super.initState();
     _alertSub = _ring.onHealthAlert.listen((event) {
-      _log('健康报警: ${event.type.name}, value=${event.value}');
+      _log(
+        '${demoTr('健康报警', 'Health alert')}: '
+        '${event.type.name}, value=${event.value}',
+      );
     });
   }
 
@@ -49,14 +53,18 @@ class _HealthAlertPageState extends State<HealthAlertPage> {
     final current = await _ring.getHeartRateAlert();
     final updated = current.copyWith(isOpen: !current.isOpen);
     await _ring.setHeartRateAlert(updated);
-    return updated.isOpen ? '已开启' : '已关闭';
+    return updated.isOpen
+        ? demoTr('已开启', 'Enabled')
+        : demoTr('已关闭', 'Disabled');
   }
 
   Future<String> _toggleBloodOxygenAlert() async {
     final current = await _ring.getBloodOxygenAlert();
     final updated = current.copyWith(isOpen: !current.isOpen);
     await _ring.setBloodOxygenAlert(updated);
-    return updated.isOpen ? '已开启' : '已关闭';
+    return updated.isOpen
+        ? demoTr('已开启', 'Enabled')
+        : demoTr('已关闭', 'Disabled');
   }
 
   @override
@@ -68,7 +76,7 @@ class _HealthAlertPageState extends State<HealthAlertPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('赞念与健康报警')),
+      appBar: AppBar(title: Text(demoTr('赞念与健康报警', 'Prayer & health alerts'))),
       body: Column(
         children: [
           Padding(
@@ -78,51 +86,62 @@ class _HealthAlertPageState extends State<HealthAlertPage> {
               runSpacing: 8,
               children: [
                 _button(
-                  '获取赞念开关',
-                  () => _run('赞念开关', () async {
+                  demoTr('获取赞念开关', 'Get prayer count setting'),
+                  () => _run(demoTr('赞念开关', 'Prayer count'), () async {
                     final enabled = await _ring.getMuslimCountEnabled();
-                    return enabled ? '已开启' : '已关闭';
+                    return enabled
+                        ? demoTr('已开启', 'Enabled')
+                        : demoTr('已关闭', 'Disabled');
                   }),
                   enabled: widget.capabilities.has(
                     DemoCapabilityKey.muslimSwitch,
                   ),
                 ),
                 _button(
-                  '开启赞念',
-                  () => _run('开启赞念', () => _ring.setMuslimCountEnabled(true)),
+                  demoTr('开启赞念', 'Enable prayer count'),
+                  () => _run(
+                    demoTr('开启赞念', 'Enable prayer count'),
+                    () => _ring.setMuslimCountEnabled(true),
+                  ),
                   enabled: widget.capabilities.has(
                     DemoCapabilityKey.muslimSwitch,
                   ),
                 ),
                 _button(
-                  '关闭赞念',
-                  () => _run('关闭赞念', () => _ring.setMuslimCountEnabled(false)),
+                  demoTr('关闭赞念', 'Disable prayer count'),
+                  () => _run(
+                    demoTr('关闭赞念', 'Disable prayer count'),
+                    () => _ring.setMuslimCountEnabled(false),
+                  ),
                   enabled: widget.capabilities.has(
                     DemoCapabilityKey.muslimSwitch,
                   ),
                 ),
                 _button(
-                  '获取心率报警',
-                  () => _run('心率报警', () async {
+                  demoTr('获取心率报警', 'Get heart-rate alert'),
+                  () => _run(demoTr('心率报警', 'Heart-rate alert'), () async {
                     final config = await _ring.getHeartRateAlert();
                     return 'open=${config.isOpen}, '
                         'high=${config.highThreshold}, '
-                        'low=${config.lowThreshold ?? '不支持'}';
+                        'low=${config.lowThreshold ?? demoTr('不支持', 'Unsupported')}';
                   }),
                   enabled: widget.capabilities.has(
                     DemoCapabilityKey.heartRateAlert,
                   ),
                 ),
                 _button(
-                  '切换心率报警',
-                  () => _run('切换心率报警', _toggleHeartRateAlert),
+                  demoTr('切换心率报警', 'Toggle heart-rate alert'),
+                  () => _run(
+                    demoTr('切换心率报警', 'Toggle heart-rate alert'),
+                    _toggleHeartRateAlert,
+                  ),
                   enabled: widget.capabilities.has(
                     DemoCapabilityKey.heartRateAlert,
                   ),
                 ),
                 _button(
-                  '获取血氧报警',
-                  () => _run('血氧报警', () async {
+                  demoTr('获取血氧报警', 'Get SpO₂ alert'),
+                  () => _run(demoTr('血氧报警', 'SpO₂ alert'), () async {
                     final config = await _ring.getBloodOxygenAlert();
                     return 'open=${config.isOpen}, low=${config.lowThreshold}';
                   }),
@@ -131,8 +150,11 @@ class _HealthAlertPageState extends State<HealthAlertPage> {
                   ),
                 ),
                 _button(
-                  '切换血氧报警',
-                  () => _run('切换血氧报警', _toggleBloodOxygenAlert),
+                  demoTr('切换血氧报警', 'Toggle SpO₂ alert'),
+                  () => _run(
+                    demoTr('切换血氧报警', 'Toggle SpO₂ alert'),
+                    _toggleBloodOxygenAlert,
+                  ),
                   enabled: widget.capabilities.has(
                     DemoCapabilityKey.bloodOxygenAlert,
                   ),
@@ -154,7 +176,7 @@ class _HealthAlertPageState extends State<HealthAlertPage> {
   }) => FilledButton.tonal(
     onPressed: enabled ? onPressed : null,
     child: Text(
-      enabled ? label : '$label(不支持)',
+      enabled ? label : '$label (${demoTr('不支持', 'Unsupported')})',
       style: const TextStyle(fontSize: 12),
     ),
   );

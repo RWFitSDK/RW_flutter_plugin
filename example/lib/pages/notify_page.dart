@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:rwfit_ble/rwfit_ble.dart';
 
 import '../support_menu.dart';
+import '../i18n.dart';
 import '../widgets/result_tile.dart';
 
 /// 消息推送 / 通知开关页：
@@ -39,11 +40,11 @@ class _NotifyPageState extends State<NotifyPage> {
 
   Future<void> _pushMessage() async {
     await _run(
-      '推送消息',
+      demoTr('推送消息', 'Send message'),
       () => _ring.pushMessage({
         'appId': 'com.rwfit.demo',
-        'title': '测试标题',
-        'content': '这是一条测试消息',
+        'title': demoTr('测试标题', 'Test title'),
+        'content': demoTr('这是一条测试消息', 'This is a test message'),
         'msgType': 1,
       }),
     );
@@ -52,7 +53,7 @@ class _NotifyPageState extends State<NotifyPage> {
   // ---- iOS 专用 ----
 
   Future<void> _getSwitch() async {
-    await _run('获取通知开关', () async {
+    await _run(demoTr('获取通知开关', 'Get notification settings'), () async {
       final s = await _ring.getNotificationSwitch();
       return s.toString();
     });
@@ -61,7 +62,7 @@ class _NotifyPageState extends State<NotifyPage> {
   Future<void> _setSwitch() async {
     // 示例：开启微信、QQ、来电、短信通知
     await _run(
-      '设置通知开关',
+      demoTr('设置通知开关', 'Set notification settings'),
       () => _ring.setNotificationSwitch({
         'isCall': true,
         'isSMS': true,
@@ -82,7 +83,7 @@ class _NotifyPageState extends State<NotifyPage> {
           : DemoCapabilityKey.pushMessageSwitch,
     );
     return Scaffold(
-      appBar: AppBar(title: const Text('消息/通知')),
+      appBar: AppBar(title: Text(demoTr('消息/通知', 'Messages / notifications'))),
       body: Column(
         children: [
           Padding(
@@ -91,14 +92,21 @@ class _NotifyPageState extends State<NotifyPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  isAndroid ? '当前平台: Android' : '当前平台: iOS',
+                  '${demoTr('当前平台', 'Platform')}: '
+                  '${isAndroid ? 'Android' : 'iOS'}',
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 8),
                 Text(
                   isAndroid
-                      ? 'Android 通过 pushMessage 主动推送消息到设备显示'
-                      : 'iOS 通过 ANCS 转发系统通知，这里设置哪些 App 的通知转发',
+                      ? demoTr(
+                          'Android 通过 pushMessage 主动推送消息到设备显示',
+                          'Android uses pushMessage to send messages to the device.',
+                        )
+                      : demoTr(
+                          'iOS 通过 ANCS 转发系统通知，这里设置哪些 App 的通知转发',
+                          'iOS forwards system notifications through ANCS; configure the enabled apps here.',
+                        ),
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
                 const SizedBox(height: 16),
@@ -109,16 +117,28 @@ class _NotifyPageState extends State<NotifyPage> {
                     if (isAndroid)
                       FilledButton.tonal(
                         onPressed: supported ? _pushMessage : null,
-                        child: Text(supported ? '推送测试消息' : '推送测试消息(不支持)'),
+                        child: Text(
+                          supported
+                              ? demoTr('推送测试消息', 'Send test message')
+                              : '${demoTr('推送测试消息', 'Send test message')} '
+                                    '(${demoTr('不支持', 'Unsupported')})',
+                        ),
                       ),
                     if (!isAndroid) ...[
                       FilledButton.tonal(
                         onPressed: supported ? _getSwitch : null,
-                        child: Text(supported ? '获取通知开关' : '获取通知开关(不支持)'),
+                        child: Text(
+                          supported
+                              ? demoTr('获取通知开关', 'Get notification settings')
+                              : '${demoTr('获取通知开关', 'Get notification settings')} '
+                                    '(${demoTr('不支持', 'Unsupported')})',
+                        ),
                       ),
                       FilledButton.tonal(
                         onPressed: supported ? _setSwitch : null,
-                        child: const Text('设置通知开关'),
+                        child: Text(
+                          demoTr('设置通知开关', 'Set notification settings'),
+                        ),
                       ),
                     ],
                   ],

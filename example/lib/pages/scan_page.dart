@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:rwfit_ble/rwfit_ble.dart';
 
 import '../device_store.dart';
+import '../i18n.dart';
 
 /// 扫描 + 连接页（对标 scan.vue），从 home_page「扫描设备」进入。
 ///
@@ -53,7 +54,10 @@ class _ScanPageState extends State<ScanPage> {
           setState(() => _connecting = null);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('连接失败${e.reason != null ? ': ${e.reason}' : ''}'),
+              content: Text(
+                '${demoTr('连接失败', 'Connection failed')}'
+                '${e.reason != null ? ': ${e.reason}' : ''}',
+              ),
             ),
           );
         }
@@ -85,9 +89,9 @@ class _ScanPageState extends State<ScanPage> {
     } catch (e) {
       if (mounted) {
         setState(() => _connecting = null);
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('连接失败: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${demoTr('连接失败', 'Connection failed')}: $e')),
+        );
       }
     }
   }
@@ -107,7 +111,7 @@ class _ScanPageState extends State<ScanPage> {
       ..sort((a, b) => b.rssi.compareTo(a.rssi));
     final connecting = _connecting;
     return Scaffold(
-      appBar: AppBar(title: const Text('扫描设备')),
+      appBar: AppBar(title: Text(demoTr('扫描设备', 'Scan devices'))),
       body: Column(
         children: [
           if (connecting != null)
@@ -125,7 +129,8 @@ class _ScanPageState extends State<ScanPage> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      '连接中: ${connecting.name.isEmpty ? '(未命名)' : connecting.name}...',
+                      '${demoTr('连接中', 'Connecting')}: '
+                      '${connecting.name.isEmpty ? demoTr('(未命名)', '(Unnamed)') : connecting.name}...',
                     ),
                   ),
                 ],
@@ -133,14 +138,27 @@ class _ScanPageState extends State<ScanPage> {
             ),
           Expanded(
             child: list.isEmpty
-                ? Center(child: Text(_scanning ? '扫描中...' : '点击右下角按钮开始扫描'))
+                ? Center(
+                    child: Text(
+                      _scanning
+                          ? demoTr('扫描中...', 'Scanning...')
+                          : demoTr(
+                              '点击右下角按钮开始扫描',
+                              'Tap the button below to start scanning',
+                            ),
+                    ),
+                  )
                 : ListView.separated(
                     itemCount: list.length,
                     separatorBuilder: (_, _) => const Divider(height: 1),
                     itemBuilder: (_, i) {
                       final d = list[i];
                       return ListTile(
-                        title: Text(d.name.isEmpty ? '(未命名)' : d.name),
+                        title: Text(
+                          d.name.isEmpty
+                              ? demoTr('(未命名)', '(Unnamed)')
+                              : d.name,
+                        ),
                         subtitle: Text('${d.uuid ?? d.mac}  rssi=${d.rssi}'),
                         trailing: const Icon(Icons.chevron_right),
                         onTap: connecting == null ? () => _connect(d) : null,
@@ -153,7 +171,7 @@ class _ScanPageState extends State<ScanPage> {
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _toggleScan,
         icon: Icon(_scanning ? Icons.stop : Icons.search),
-        label: Text(_scanning ? '停止' : '扫描'),
+        label: Text(_scanning ? demoTr('停止', 'Stop') : demoTr('扫描', 'Scan')),
       ),
     );
   }

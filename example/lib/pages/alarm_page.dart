@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:rwfit_ble/rwfit_ble.dart';
 
 import '../support_menu.dart';
+import '../i18n.dart';
 import '../widgets/result_tile.dart';
 
 /// 闹钟页：查询/全量设置/删除 演示（全量下发约束）。
@@ -25,14 +26,20 @@ class _AlarmPageState extends State<AlarmPage> {
     try {
       final list = await _ring.getAlarm();
       setState(() => _alarms = list);
-      _log('获取闹钟 ✓ 共 ${list.length} 个');
+      _log(
+        '${demoTr('获取闹钟', 'Get alarms')} ✓ '
+        '${demoTr('共', 'Total')} ${list.length}',
+      );
       for (final a in list) {
         _log(
-          '  #${a.alarmId} ${a.startHour.toString().padLeft(2, '0')}:${a.startMin.toString().padLeft(2, '0')} ${a.isOpen ? "开" : "关"} repeats=${a.repeats}',
+          '  #${a.alarmId} ${a.startHour.toString().padLeft(2, '0')}:'
+          '${a.startMin.toString().padLeft(2, '0')} '
+          '${a.isOpen ? demoTr('开', 'On') : demoTr('关', 'Off')} '
+          'repeats=${a.repeats}',
         );
       }
     } on RwfitException catch (e) {
-      _log('获取闹钟 ✗ [${e.code}] ${e.message}');
+      _log('${demoTr('获取闹钟', 'Get alarms')} ✗ [${e.code}] ${e.message}');
     }
   }
 
@@ -56,15 +63,18 @@ class _AlarmPageState extends State<AlarmPage> {
     ];
     try {
       await _ring.setAlarm(alarms);
-      _log('设置闹钟 ✓ 下发 ${alarms.length} 个');
+      _log(
+        '${demoTr('设置闹钟', 'Set alarms')} ✓ '
+        '${demoTr('下发', 'Sent')} ${alarms.length}',
+      );
     } on RwfitException catch (e) {
-      _log('设置闹钟 ✗ [${e.code}] ${e.message}');
+      _log('${demoTr('设置闹钟', 'Set alarms')} ✗ [${e.code}] ${e.message}');
     }
   }
 
   Future<void> _toggleFirst() async {
     if (_alarms.isEmpty) {
-      _log('请先获取闹钟');
+      _log(demoTr('请先获取闹钟', 'Get alarms first'));
       return;
     }
     // 切换第一个闹钟的开关，全量下发
@@ -73,9 +83,12 @@ class _AlarmPageState extends State<AlarmPage> {
     try {
       await _ring.setAlarm(newList);
       setState(() => _alarms = newList);
-      _log('切换闹钟#${toggled.alarmId} → ${toggled.isOpen ? "开" : "关"} ✓');
+      _log(
+        '${demoTr('切换闹钟', 'Toggle alarm')}#${toggled.alarmId} → '
+        '${toggled.isOpen ? demoTr('开', 'On') : demoTr('关', 'Off')} ✓',
+      );
     } on RwfitException catch (e) {
-      _log('切换闹钟 ✗ [${e.code}] ${e.message}');
+      _log('${demoTr('切换闹钟', 'Toggle alarm')} ✗ [${e.code}] ${e.message}');
     }
   }
 
@@ -83,9 +96,9 @@ class _AlarmPageState extends State<AlarmPage> {
     try {
       await _ring.deleteAllAlarm();
       setState(() => _alarms = []);
-      _log('删除全部闹钟 ✓');
+      _log('${demoTr('删除全部闹钟', 'Delete all alarms')} ✓');
     } on RwfitException catch (e) {
-      _log('删除全部 ✗ [${e.code}] ${e.message}');
+      _log('${demoTr('删除全部', 'Delete all')} ✗ [${e.code}] ${e.message}');
     }
   }
 
@@ -93,7 +106,7 @@ class _AlarmPageState extends State<AlarmPage> {
   Widget build(BuildContext context) {
     final supported = widget.capabilities.has(DemoCapabilityKey.alarm);
     return Scaffold(
-      appBar: AppBar(title: const Text('闹钟')),
+      appBar: AppBar(title: Text(demoTr('闹钟', 'Alarms'))),
       body: Column(
         children: [
           Padding(
@@ -104,19 +117,24 @@ class _AlarmPageState extends State<AlarmPage> {
               children: [
                 FilledButton.tonal(
                   onPressed: supported ? _getAlarms : null,
-                  child: Text(supported ? '获取闹钟' : '获取闹钟(不支持)'),
+                  child: Text(
+                    supported
+                        ? demoTr('获取闹钟', 'Get alarms')
+                        : '${demoTr('获取闹钟', 'Get alarms')} '
+                              '(${demoTr('不支持', 'Unsupported')})',
+                  ),
                 ),
                 FilledButton.tonal(
                   onPressed: supported ? _setDemo : null,
-                  child: const Text('设置示例闹钟'),
+                  child: Text(demoTr('设置示例闹钟', 'Set sample alarms')),
                 ),
                 FilledButton.tonal(
                   onPressed: supported ? _toggleFirst : null,
-                  child: const Text('切换第1个开关'),
+                  child: Text(demoTr('切换第1个开关', 'Toggle first alarm')),
                 ),
                 FilledButton.tonal(
                   onPressed: supported ? _deleteAll : null,
-                  child: const Text('删除全部'),
+                  child: Text(demoTr('删除全部', 'Delete all')),
                 ),
               ],
             ),

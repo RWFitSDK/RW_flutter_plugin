@@ -1,22 +1,45 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:rwfit_ble/rwfit_ble.dart';
 
+import 'i18n.dart';
 import 'pages/home_page.dart';
 
 void main() => runApp(const MyApp());
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
 
   @override
-  Widget build(BuildContext context) => MaterialApp(
-    title: 'RWFIT Ble Demo',
-    theme: ThemeData(colorSchemeSeed: Colors.teal, useMaterial3: true),
-    home: const PermissionGate(),
-  );
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  late DemoLanguage _language = detectSystemLanguage();
+
+  @override
+  Widget build(BuildContext context) {
+    setDemoLanguage(_language);
+    return DemoI18n(
+      language: _language,
+      onToggleLanguage: () => setState(
+        () => _language = _language == DemoLanguage.zh
+            ? DemoLanguage.en
+            : DemoLanguage.zh,
+      ),
+      child: MaterialApp(
+        title: 'RWFIT BLE Demo',
+        locale: Locale(_language.name),
+        supportedLocales: const [Locale('zh'), Locale('en')],
+        localizationsDelegates: GlobalMaterialLocalizations.delegates,
+        theme: ThemeData(colorSchemeSeed: Colors.teal, useMaterial3: true),
+        home: const PermissionGate(),
+      ),
+    );
+  }
 }
 
 /// 启动时请求蓝牙权限，通过后进入功能主页（落地页）。
@@ -28,7 +51,7 @@ class PermissionGate extends StatefulWidget {
 }
 
 class _PermissionGateState extends State<PermissionGate> {
-  String _status = '正在请求蓝牙权限...';
+  _PermissionStatus _status = _PermissionStatus.requesting;
   bool _granted = false;
 
   @override
@@ -49,13 +72,15 @@ class _PermissionGateState extends State<PermissionGate> {
       );
       setState(() {
         _granted = allGranted;
-        _status = allGranted ? '权限已授予' : '部分权限被拒绝，蓝牙功能可能受限';
+        _status = allGranted
+            ? _PermissionStatus.granted
+            : _PermissionStatus.denied;
       });
     } else {
       // iOS 蓝牙权限在首次使用时系统自动弹窗
       setState(() {
         _granted = true;
-        _status = '权限已就绪';
+        _status = _PermissionStatus.ready;
       });
     }
 
@@ -75,6 +100,18 @@ class _PermissionGateState extends State<PermissionGate> {
 
   @override
   Widget build(BuildContext context) {
+    final statusText = switch (_status) {
+      _PermissionStatus.requesting => demoTr(
+        '正在请求蓝牙权限...',
+        'Requesting Bluetooth permissions...',
+      ),
+      _PermissionStatus.granted => demoTr('权限已授予', 'Permissions granted'),
+      _PermissionStatus.denied => demoTr(
+        '部分权限被拒绝，蓝牙功能可能受限',
+        'Some permissions were denied; Bluetooth features may be limited',
+      ),
+      _PermissionStatus.ready => demoTr('权限已就绪', 'Permissions are ready'),
+    };
     return Scaffold(
       appBar: AppBar(title: const Text('RWFIT Ble Demo')),
       body: Center(
@@ -83,12 +120,12 @@ class _PermissionGateState extends State<PermissionGate> {
           children: [
             const CircularProgressIndicator(),
             const SizedBox(height: 16),
-            Text(_status),
+            Text(statusText),
             if (!_granted) ...[
               const SizedBox(height: 16),
               FilledButton(
                 onPressed: _requestPermissions,
-                child: const Text('重新请求权限'),
+                child: Text(demoTr('重新请求权限', 'Request permissions again')),
               ),
             ],
           ],
@@ -97,3 +134,5 @@ class _PermissionGateState extends State<PermissionGate> {
     );
   }
 }
+
+enum _PermissionStatus { requesting, granted, denied, ready }

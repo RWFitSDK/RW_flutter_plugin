@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:rwfit_ble/rwfit_ble.dart';
 
 import '../support_menu.dart';
+import '../i18n.dart';
 
 /// 实时测量页：演示 HR/BO/HRV/压力/血糖/血压（同一时间只能开一种）。
 class RealtimePage extends StatefulWidget {
@@ -27,7 +28,9 @@ class _RealtimePageState extends State<RealtimePage> {
     super.initState();
     _dataSub = _ring.onRealtimeData.listen((d) {
       final typeStr = d.type?.name ?? 'unknown';
-      final extra = d.diastolic != null ? ' 舒张压=${d.diastolic}' : '';
+      final extra = d.diastolic != null
+          ? ' ${demoTr('舒张压', 'Diastolic')}=${d.diastolic}'
+          : '';
       setState(() => _data.insert(0, '[$typeStr] ${d.value}$extra'));
       if (_data.length > 50) _data.removeLast();
     });
@@ -36,7 +39,10 @@ class _RealtimePageState extends State<RealtimePage> {
       final metric = _active!;
       setState(() {
         _active = null;
-        _data.insert(0, '[${metric.name}] 测量完成');
+        _data.insert(
+          0,
+          '[${_metricName(metric)}] ${demoTr('测量完成', 'Measurement complete')}',
+        );
       });
     });
   }
@@ -50,7 +56,7 @@ class _RealtimePageState extends State<RealtimePage> {
       await _ring.startRealtimeMeasure(metric);
       setState(() => _active = metric);
     } on RwfitException catch (e) {
-      _showError('开启失败: ${e.message}');
+      _showError('${demoTr('开启失败', 'Failed to start')}: ${e.message}');
     }
   }
 
@@ -60,7 +66,7 @@ class _RealtimePageState extends State<RealtimePage> {
       await _ring.stopRealtimeMeasure(_active!);
       setState(() => _active = null);
     } on RwfitException catch (e) {
-      _showError('关闭失败: ${e.message}');
+      _showError('${demoTr('关闭失败', 'Failed to stop')}: ${e.message}');
     }
   }
 
@@ -69,6 +75,15 @@ class _RealtimePageState extends State<RealtimePage> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
     }
   }
+
+  String _metricName(RealtimeMetric metric) => switch (metric) {
+    RealtimeMetric.hr => demoTr('心率', 'Heart rate'),
+    RealtimeMetric.bloodOxy => demoTr('血氧', 'SpO₂'),
+    RealtimeMetric.hrv => 'HRV',
+    RealtimeMetric.pressure => demoTr('压力', 'Stress'),
+    RealtimeMetric.bloodSugar => demoTr('血糖', 'Blood glucose'),
+    RealtimeMetric.bloodPressure => demoTr('血压', 'Blood pressure'),
+  };
 
   @override
   void dispose() {
@@ -81,13 +96,16 @@ class _RealtimePageState extends State<RealtimePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('实时测量')),
+      appBar: AppBar(title: Text(demoTr('实时测量', 'Real-time measurement'))),
       body: Column(
         children: [
           Padding(
             padding: const EdgeInsets.all(12),
             child: Text(
-              _active != null ? '当前测量: ${_active!.name}' : '未开启测量',
+              _active != null
+                  ? '${demoTr('当前测量', 'Current measurement')}: '
+                        '${_metricName(_active!)}'
+                  : demoTr('未开启测量', 'No active measurement'),
               style: Theme.of(context).textTheme.titleMedium,
             ),
           ),
@@ -99,8 +117,9 @@ class _RealtimePageState extends State<RealtimePage> {
                 ChoiceChip(
                   label: Text(
                     widget.capabilities.supportsRealtime(m)
-                        ? m.name
-                        : '${m.name}(不支持)',
+                        ? _metricName(m)
+                        : '${_metricName(m)} '
+                              '(${demoTr('不支持', 'Unsupported')})',
                   ),
                   selected: _active == m,
                   onSelected: widget.capabilities.supportsRealtime(m)
@@ -112,7 +131,7 @@ class _RealtimePageState extends State<RealtimePage> {
           const SizedBox(height: 8),
           FilledButton(
             onPressed: _active != null ? _stop : null,
-            child: const Text('停止测量'),
+            child: Text(demoTr('停止测量', 'Stop measurement')),
           ),
           const Divider(),
           Expanded(

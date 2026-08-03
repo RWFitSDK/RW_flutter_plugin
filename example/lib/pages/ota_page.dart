@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:rwfit_ble/rwfit_ble.dart';
 
 import '../widgets/result_tile.dart';
+import '../i18n.dart';
 
 /// OTA 升级页：选固件路径 → 升级 → 进度/完成事件监听。
 class OtaPage extends StatefulWidget {
@@ -33,9 +34,9 @@ class _OtaPageState extends State<OtaPage> {
       _ring.onOtaFinish.listen((r) {
         setState(() => _upgrading = false);
         if (r.success) {
-          _log('OTA 升级成功 ✓');
+          _log('${demoTr('OTA 升级成功', 'OTA upgrade succeeded')} ✓');
         } else {
-          _log('OTA 升级失败: code=${r.code}');
+          _log('${demoTr('OTA 升级失败', 'OTA upgrade failed')}: code=${r.code}');
         }
       }),
     );
@@ -46,7 +47,7 @@ class _OtaPageState extends State<OtaPage> {
   Future<void> _startOta() async {
     final path = _pathController.text.trim();
     if (path.isEmpty) {
-      _log('请输入固件文件路径');
+      _log(demoTr('请输入固件文件路径', 'Enter a firmware file path'));
       return;
     }
     setState(() {
@@ -55,10 +56,10 @@ class _OtaPageState extends State<OtaPage> {
     });
     try {
       await _ring.ringOta(path);
-      _log('OTA 指令已发送...');
+      _log(demoTr('OTA 指令已发送...', 'OTA command sent...'));
     } on RwfitException catch (e) {
       setState(() => _upgrading = false);
-      _log('OTA 失败: [${e.code}] ${e.message}');
+      _log('${demoTr('OTA 失败', 'OTA failed')}: [${e.code}] ${e.message}');
     }
   }
 
@@ -74,7 +75,7 @@ class _OtaPageState extends State<OtaPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('OTA 升级')),
+      appBar: AppBar(title: Text(demoTr('OTA 升级', 'OTA upgrade'))),
       body: Column(
         children: [
           Padding(
@@ -83,20 +84,27 @@ class _OtaPageState extends State<OtaPage> {
               children: [
                 TextField(
                   controller: _pathController,
-                  decoration: const InputDecoration(
-                    labelText: '固件文件路径',
+                  decoration: InputDecoration(
+                    labelText: demoTr('固件文件路径', 'Firmware file path'),
                     hintText: '/sdcard/Download/firmware.bin',
-                    border: OutlineInputBorder(),
+                    border: const OutlineInputBorder(),
                   ),
                 ),
                 const SizedBox(height: 16),
                 LinearProgressIndicator(value: _progress),
                 const SizedBox(height: 8),
-                Text('进度: ${(_progress * 100).toStringAsFixed(1)}%'),
+                Text(
+                  '${demoTr('进度', 'Progress')}: '
+                  '${(_progress * 100).toStringAsFixed(1)}%',
+                ),
                 const SizedBox(height: 16),
                 FilledButton(
                   onPressed: _upgrading ? null : _startOta,
-                  child: Text(_upgrading ? '升级中...' : '开始 OTA'),
+                  child: Text(
+                    _upgrading
+                        ? demoTr('升级中...', 'Upgrading...')
+                        : demoTr('开始 OTA', 'Start OTA'),
+                  ),
                 ),
               ],
             ),

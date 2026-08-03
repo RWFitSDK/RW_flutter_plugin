@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:rwfit_ble/rwfit_ble.dart';
 
 import '../device_store.dart';
+import '../i18n.dart';
 import '../support_menu.dart';
 import 'device_info_page.dart';
 import 'timed_monitor_page.dart';
@@ -35,7 +36,7 @@ class _HomePageState extends State<HomePage> {
   final _subs = <StreamSubscription>[];
   bool _ready = false;
   DemoCapabilities _capabilities = const DemoCapabilities.empty();
-  String _conn = '未连接';
+  String _conn = 'disconnected';
   BleDevice? _saved;
 
   @override
@@ -103,15 +104,18 @@ class _HomePageState extends State<HomePage> {
     final saved = _saved;
     if (saved == null) return;
     if (await _ring.isConnected()) {
-      _toast('设备已连接');
+      _toast(demoTr('设备已连接', 'Device is already connected'));
       return;
     }
     setState(() => _conn = 'connecting');
     try {
       await _ring.reconnect(saved);
-      _toast('重连指令已发送: ${saved.name.isEmpty ? saved.mac : saved.name}');
+      _toast(
+        '${demoTr('重连指令已发送', 'Reconnect command sent')}: '
+        '${saved.name.isEmpty ? saved.mac : saved.name}',
+      );
     } catch (e) {
-      _toast('重连失败: $e');
+      _toast('${demoTr('重连失败', 'Reconnect failed')}: $e');
     }
   }
 
@@ -125,7 +129,7 @@ class _HomePageState extends State<HomePage> {
         _capabilities = const DemoCapabilities.empty();
       });
     } catch (e) {
-      _toast('断开失败: $e');
+      _toast('${demoTr('断开失败', 'Disconnect failed')}: $e');
     }
   }
 
@@ -140,8 +144,30 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final connection = switch (_conn) {
+      'connected' => demoTr('已连接', 'Connected'),
+      'connecting' => demoTr('连接中', 'Connecting'),
+      'failed' => demoTr('连接失败', 'Connection failed'),
+      _ => demoTr('未连接', 'Disconnected'),
+    };
     return Scaffold(
-      appBar: AppBar(title: const Text('RWFIT 戒指')),
+      appBar: AppBar(
+        title: Text(demoTr('RWFIT 戒指', 'RWFIT Ring')),
+        actions: [
+          Tooltip(
+            message: context.language == DemoLanguage.zh
+                ? 'Switch to English'
+                : '切换到中文',
+            child: TextButton(
+              onPressed: context.toggleLanguage,
+              child: Text(
+                context.language == DemoLanguage.zh ? 'EN' : '中文',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+          ),
+        ],
+      ),
       body: Column(
         children: [
           Container(
@@ -149,7 +175,8 @@ class _HomePageState extends State<HomePage> {
             padding: const EdgeInsets.all(16),
             color: _ready ? Colors.green.shade50 : Colors.orange.shade50,
             child: Text(
-              '连接状态: $_conn${_ready ? ' (已就绪)' : ''}',
+              '${demoTr('连接状态', 'Connection')}: $connection'
+              '${_ready ? demoTr(' (已就绪)', ' (Ready)') : ''}',
               style: TextStyle(
                 color: _ready ? Colors.green.shade800 : Colors.orange.shade800,
               ),
@@ -161,28 +188,40 @@ class _HomePageState extends State<HomePage> {
             child: ListView(
               children: [
                 _tile(
-                  '设备信息',
-                  '电量/固件/用户信息/时间格式',
+                  demoTr('设备信息', 'Device info'),
+                  demoTr(
+                    '电量/固件/用户信息/时间格式',
+                    'Battery / firmware / user info / time format',
+                  ),
                   Icons.info_outline,
                   () => _push(const DeviceInfoPage()),
                 ),
                 _tile(
-                  '全天检测',
-                  '心率/血氧/HRV/压力/血糖/血压/体温/PPG',
+                  demoTr('全天检测', 'All-day monitoring'),
+                  demoTr(
+                    '心率/血氧/HRV/压力/血糖/血压/体温/PPG',
+                    'Heart rate / SpO₂ / HRV / stress / glucose / BP / temperature / PPG',
+                  ),
                   Icons.monitor_heart,
                   () => _push(TimedMonitorPage(capabilities: _capabilities)),
                   enabled: _ready && _capabilities.supportsAnyTimedMonitor,
                 ),
                 _tile(
-                  '实时测量',
-                  '实时心率/血氧/血压等（互斥）',
+                  demoTr('实时测量', 'Real-time measurement'),
+                  demoTr(
+                    '实时心率/血氧/血压等（互斥）',
+                    'Real-time heart rate / SpO₂ / BP (mutually exclusive)',
+                  ),
                   Icons.favorite,
                   () => _push(RealtimePage(capabilities: _capabilities)),
                   enabled: _ready && _capabilities.supportsAnyRealtime,
                 ),
                 _tile(
-                  '设备控制',
-                  '找设备/关机/拍照/LED/佩戴/振动',
+                  demoTr('设备控制', 'Device controls'),
+                  demoTr(
+                    '找设备/关机/拍照/LED/佩戴/振动',
+                    'Find device / power / camera / LED / wearing / vibration',
+                  ),
                   Icons.settings_remote,
                   () => _push(ControlPage(capabilities: _capabilities)),
                   enabled:
@@ -191,51 +230,66 @@ class _HomePageState extends State<HomePage> {
                           Platform.isAndroid),
                 ),
                 _tile(
-                  '赞念与健康报警',
-                  '赞念开关 / 心率和血氧报警 / 实时报警事件',
+                  demoTr('赞念与健康报警', 'Prayer & health alerts'),
+                  demoTr(
+                    '赞念开关 / 心率和血氧报警 / 实时报警事件',
+                    'Prayer count / heart rate and SpO₂ alerts / live events',
+                  ),
                   Icons.health_and_safety_outlined,
                   () => _push(HealthAlertPage(capabilities: _capabilities)),
                   enabled: _ready && _capabilities.supportsAnyHealthAlert,
                 ),
                 _tile(
-                  '传感器原始数据',
-                  'PPG / ACC / Red / IR / 睡眠状态',
+                  demoTr('传感器原始数据', 'Raw sensor data'),
+                  demoTr(
+                    'PPG / ACC / Red / IR / 睡眠状态',
+                    'PPG / ACC / Red / IR / sleep state',
+                  ),
                   Icons.sensors,
                   () => _push(SensorRawPage(capabilities: _capabilities)),
                   enabled: _ready && _capabilities.supportsAnySensorRaw,
                 ),
                 _tile(
-                  '闹钟',
-                  '查询/设置/删除（全量下发）',
+                  demoTr('闹钟', 'Alarms'),
+                  demoTr(
+                    '查询/设置/删除（全量下发）',
+                    'Read / set / delete (full replacement)',
+                  ),
                   Icons.alarm,
                   () => _push(AlarmPage(capabilities: _capabilities)),
                   enabled: _ready && _capabilities.has(DemoCapabilityKey.alarm),
                 ),
                 _tile(
-                  '数据同步',
-                  '历史健康数据同步',
+                  demoTr('数据同步', 'Data sync'),
+                  demoTr('历史健康数据同步', 'Historical health data sync'),
                   Icons.sync,
                   () => _push(SyncPage(capabilities: _capabilities)),
                   enabled: _ready && _capabilities.supportsAnyHealthData,
                 ),
                 _tile(
-                  '多运动',
+                  demoTr('多运动', 'Workouts'),
                   _capabilities.supportsWorkout
-                      ? '运动类型选择 / 实时运动控制与数据'
-                      : '当前设备不支持多运动',
+                      ? demoTr(
+                          '运动类型选择 / 实时运动控制与数据',
+                          'Workout selection / live controls and data',
+                        )
+                      : demoTr('当前设备不支持多运动', 'Workout mode is not supported'),
                   Icons.directions_run,
                   () => _push(const WorkoutPage()),
                   enabled: _ready && _capabilities.supportsWorkout,
                 ),
                 _tile(
-                  'OTA 升级',
-                  '固件升级',
+                  demoTr('OTA 升级', 'OTA upgrade'),
+                  demoTr('固件升级', 'Firmware upgrade'),
                   Icons.system_update,
                   () => _push(const OtaPage()),
                 ),
                 _tile(
-                  '消息/通知',
-                  'Android 推送 / iOS ANCS 开关',
+                  demoTr('消息/通知', 'Messages / notifications'),
+                  demoTr(
+                    'Android 推送 / iOS ANCS 开关',
+                    'Android messages / iOS ANCS settings',
+                  ),
                   Icons.notifications,
                   () => _push(NotifyPage(capabilities: _capabilities)),
                   enabled:
@@ -261,13 +315,17 @@ class _HomePageState extends State<HomePage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('连接管理', style: TextStyle(fontWeight: FontWeight.bold)),
+          Text(
+            demoTr('连接管理', 'Connection'),
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
           const SizedBox(height: 8),
           if (saved != null)
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: Text(
-                '已保存设备: ${saved.name.isEmpty ? '(未命名)' : saved.name}'
+                '${demoTr('已保存设备', 'Saved device')}: '
+                '${saved.name.isEmpty ? demoTr('(未命名)', '(Unnamed)') : saved.name}'
                 ' (${saved.uuid ?? saved.mac})',
                 style: TextStyle(fontSize: 13, color: Colors.blueGrey.shade700),
               ),
@@ -279,17 +337,17 @@ class _HomePageState extends State<HomePage> {
               FilledButton.icon(
                 onPressed: _openScan,
                 icon: const Icon(Icons.search, size: 18),
-                label: const Text('扫描设备'),
+                label: Text(demoTr('扫描设备', 'Scan devices')),
               ),
               OutlinedButton.icon(
                 onPressed: saved == null ? null : _reconnect,
                 icon: const Icon(Icons.refresh, size: 18),
-                label: const Text('重连设备'),
+                label: Text(demoTr('重连设备', 'Reconnect')),
               ),
               OutlinedButton.icon(
                 onPressed: _disconnect,
                 icon: const Icon(Icons.link_off, size: 18),
-                label: const Text('断开连接'),
+                label: Text(demoTr('断开连接', 'Disconnect')),
               ),
             ],
           ),

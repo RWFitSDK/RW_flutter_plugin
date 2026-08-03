@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:rwfit_ble/rwfit_ble.dart';
 
 import '../support_menu.dart';
+import '../i18n.dart';
 import '../widgets/result_tile.dart';
 
 /// 定时监测页：7 项全天健康检测 + PPG 配置 get/set 演示。
@@ -24,7 +25,9 @@ class _TimedMonitorPageState extends State<TimedMonitorPage> {
     try {
       final c = await fn();
       _log(
-        '$label → open=${c.isOpen} ${c.startHour}:${c.startMin}-${c.endHour}:${c.endMin} 间隔${c.duration}min',
+        '$label → open=${c.isOpen} ${c.startHour}:${c.startMin}-'
+        '${c.endHour}:${c.endMin} '
+        '${demoTr('间隔', 'interval')}=${c.duration}min',
       );
     } on RwfitException catch (e) {
       _log('$label ✗ [${e.code}] ${e.message}');
@@ -49,7 +52,7 @@ class _TimedMonitorPageState extends State<TimedMonitorPage> {
     );
     try {
       await fn(config);
-      _log('$label 设置成功 ✓');
+      _log('$label ${demoTr('设置成功', 'set successfully')} ✓');
     } on RwfitException catch (e) {
       _log('$label ✗ [${e.code}] ${e.message}');
     } catch (e) {
@@ -60,7 +63,7 @@ class _TimedMonitorPageState extends State<TimedMonitorPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('全天检测')),
+      appBar: AppBar(title: Text(demoTr('全天检测', 'All-day monitoring'))),
       body: Column(
         children: [
           Expanded(
@@ -71,7 +74,7 @@ class _TimedMonitorPageState extends State<TimedMonitorPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _row(
-                    '心率',
+                    demoTr('心率', 'Heart rate'),
                     _ring.getTimedHeartRate,
                     _ring.setTimedHeartRate,
                     duration: 30,
@@ -80,7 +83,7 @@ class _TimedMonitorPageState extends State<TimedMonitorPage> {
                     ),
                   ),
                   _row(
-                    '血氧',
+                    demoTr('血氧', 'SpO₂'),
                     _ring.getTimedBloodOxygen,
                     _ring.setTimedBloodOxygen,
                     duration: 60,
@@ -96,7 +99,7 @@ class _TimedMonitorPageState extends State<TimedMonitorPage> {
                     enabled: widget.capabilities.has(DemoCapabilityKey.hrv),
                   ),
                   _row(
-                    '压力',
+                    demoTr('压力', 'Stress'),
                     _ring.getTimedStress,
                     _ring.setTimedStress,
                     duration: 60,
@@ -105,7 +108,7 @@ class _TimedMonitorPageState extends State<TimedMonitorPage> {
                     ),
                   ),
                   _row(
-                    '血糖',
+                    demoTr('血糖', 'Blood glucose'),
                     _ring.getTimedBloodSugar,
                     _ring.setTimedBloodSugar,
                     duration: 60,
@@ -114,7 +117,7 @@ class _TimedMonitorPageState extends State<TimedMonitorPage> {
                     ),
                   ),
                   _row(
-                    '血压',
+                    demoTr('血压', 'Blood pressure'),
                     _ring.getTimedBloodPressure,
                     _ring.setTimedBloodPressure,
                     duration: 60,
@@ -123,7 +126,7 @@ class _TimedMonitorPageState extends State<TimedMonitorPage> {
                     ),
                   ),
                   _row(
-                    '体温',
+                    demoTr('体温', 'Temperature'),
                     _ring.getTimedBodyTemperature,
                     _ring.setTimedBodyTemperature,
                     duration: 30,
@@ -165,21 +168,23 @@ class _TimedMonitorPageState extends State<TimedMonitorPage> {
           SizedBox(width: 48, child: Text(label)),
           const SizedBox(width: 8),
           FilledButton.tonal(
-            onPressed: enabled ? () => _get('获取$label', getter) : null,
-            child: const Text('获取'),
+            onPressed: enabled
+                ? () => _get('${demoTr('获取', 'Get')} $label', getter)
+                : null,
+            child: Text(demoTr('获取', 'Get')),
           ),
           const SizedBox(width: 8),
           FilledButton.tonal(
             onPressed: enabled
-                ? () => _set('设置$label', duration, setter)
+                ? () => _set('${demoTr('设置', 'Set')} $label', duration, setter)
                 : null,
-            child: const Text('设置'),
+            child: Text(demoTr('设置', 'Set')),
           ),
           if (!enabled) ...[
             const SizedBox(width: 8),
-            const Text(
-              '不支持',
-              style: TextStyle(color: Colors.grey, fontSize: 12),
+            Text(
+              demoTr('不支持', 'Unsupported'),
+              style: const TextStyle(color: Colors.grey, fontSize: 12),
             ),
           ],
         ],

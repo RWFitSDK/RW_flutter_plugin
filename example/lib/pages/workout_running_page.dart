@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:rwfit_ble/rwfit_ble.dart';
 
+import '../i18n.dart';
 import 'workout_types.dart';
 
 /// 实时运动页，对应 Android Demo 的 WorkoutRunningActivity。
@@ -96,10 +97,17 @@ class _WorkoutRunningPageState extends State<WorkoutRunningPage>
       if (mounted) setState(() => _realtimeEnabled = enabled);
     } on RwfitException catch (error) {
       if (showError) {
-        _showMessage('实时数据开关失败：[${error.code}] ${error.message}');
+        _showMessage(
+          '${demoTr('实时数据开关失败', 'Failed to enable live data')}: '
+          '[${error.code}] ${error.message}',
+        );
       }
     } catch (error) {
-      if (showError) _showMessage('实时数据开关失败：$error');
+      if (showError) {
+        _showMessage(
+          '${demoTr('实时数据开关失败', 'Failed to enable live data')}: $error',
+        );
+      }
     }
   }
 
@@ -115,9 +123,12 @@ class _WorkoutRunningPageState extends State<WorkoutRunningPage>
       final state = await _ring.getWorkoutState();
       if (mounted) setState(() => _state = state);
     } on RwfitException catch (error) {
-      _showMessage('运动控制失败：[${error.code}] ${error.message}');
+      _showMessage(
+        '${demoTr('运动控制失败', 'Workout control failed')}: '
+        '[${error.code}] ${error.message}',
+      );
     } catch (error) {
-      _showMessage('运动控制失败：$error');
+      _showMessage('${demoTr('运动控制失败', 'Workout control failed')}: $error');
     } finally {
       if (mounted && !_leaving) setState(() => _busy = false);
     }
@@ -127,11 +138,17 @@ class _WorkoutRunningPageState extends State<WorkoutRunningPage>
     String message;
     try {
       final reports = await _ring.getWorkoutReports();
-      message = '运动已结束，已同步 ${reports.length} 条历史报告';
+      message =
+          '${demoTr('运动已结束，已同步', 'Workout ended; synced')} '
+          '${reports.length} ${demoTr('条历史报告', 'reports')}';
     } on RwfitException catch (error) {
-      message = '运动已结束，报告同步失败：[${error.code}] ${error.message}';
+      message =
+          '${demoTr('运动已结束，报告同步失败', 'Workout ended; report sync failed')}: '
+          '[${error.code}] ${error.message}';
     } catch (error) {
-      message = '运动已结束，报告同步失败：$error';
+      message =
+          '${demoTr('运动已结束，报告同步失败', 'Workout ended; report sync failed')}: '
+          '$error';
     }
     if (!mounted || _leaving) return;
     Navigator.of(context).pop(message);
@@ -165,29 +182,32 @@ class _WorkoutRunningPageState extends State<WorkoutRunningPage>
     return PopScope(
       canPop: !_busy,
       child: Scaffold(
-        appBar: AppBar(title: const Text('实时运动数据')),
+        appBar: AppBar(title: Text(demoTr('实时运动数据', 'Live workout data'))),
         body: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
-                '类型：${workoutTypeName(_state.sportType)}'
-                '（${_state.sportType}）',
+                '${demoTr('类型', 'Type')}: '
+                '${workoutTypeName(_state.sportType)} (${_state.sportType})',
                 style: Theme.of(context).textTheme.titleLarge,
               ),
               const SizedBox(height: 20),
-              _metric('时间', _durationText),
-              _metric('步数', '${data?.steps ?? 0}'),
+              _metric(demoTr('时间', 'Time'), _durationText),
+              _metric(demoTr('步数', 'Steps'), '${data?.steps ?? 0}'),
               _metric(
-                '距离',
+                demoTr('距离', 'Distance'),
                 '${((data?.distance ?? 0) / 1000).toStringAsFixed(2)} Km',
               ),
               _metric(
-                '卡路里',
+                demoTr('卡路里', 'Calories'),
                 '${((data?.calorie ?? 0) / 1000).toStringAsFixed(1)} KCal',
               ),
-              _metric('心率', '${data?.heartRate ?? 0} bpm'),
+              _metric(
+                demoTr('心率', 'Heart rate'),
+                '${data?.heartRate ?? 0} bpm',
+              ),
               const SizedBox(height: 24),
               Wrap(
                 alignment: WrapAlignment.center,
@@ -198,21 +218,21 @@ class _WorkoutRunningPageState extends State<WorkoutRunningPage>
                     onPressed: _busy
                         ? null
                         : () => _control(WorkoutControlType.end),
-                    child: const Text('结束'),
+                    child: Text(demoTr('结束', 'End')),
                   ),
                   if (canPause)
                     FilledButton(
                       onPressed: _busy
                           ? null
                           : () => _control(WorkoutControlType.pause),
-                      child: const Text('暂停'),
+                      child: Text(demoTr('暂停', 'Pause')),
                     ),
                   if (canResume)
                     FilledButton(
                       onPressed: _busy
                           ? null
                           : () => _control(WorkoutControlType.resume),
-                      child: const Text('继续'),
+                      child: Text(demoTr('继续', 'Resume')),
                     ),
                 ],
               ),

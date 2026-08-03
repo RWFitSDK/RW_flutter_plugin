@@ -1074,7 +1074,7 @@ final reports = await ring.getWorkoutReports();
 
 **`SensorRawDataType`：** `timestamp(0)`、`ppg(1)`、`acc(2)`、`ppgRed(3)`、`ir(4)`、`sleep(5)`、`unknown(-1)`。
 
-> 原始数据采样率最高可达 100 Hz，设备通常最多保存约 1 分钟测试数据。
+> 原始数据设备通常最多保存约 1 分钟测试数据。
 
 ##### 3.2.5.3 睡眠状态实时推送
 

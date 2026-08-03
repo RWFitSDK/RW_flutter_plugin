@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:rwfit_ble/rwfit_ble.dart';
 
 import '../support_menu.dart';
+import '../i18n.dart';
 import '../widgets/result_tile.dart';
 
 /// 数据同步页：演示 syncAllHealthData + 完成标记/结果/完成事件监听。
@@ -33,19 +34,22 @@ class _SyncPageState extends State<SyncPage> {
     );
     _subs.add(
       _ring.onSyncResult.listen((r) {
-        _log('数据[${r.type}]: ${r.data.length} 条');
+        _log(
+          '${demoTr('数据', 'Data')}[${r.type}]: ${r.data.length} '
+          '${demoTr('条', 'items')}',
+        );
       }),
     );
     _subs.add(
       _ring.onSyncFinish.listen((_) {
         setState(() => _syncing = false);
-        _log('同步完成 ✓');
+        _log('${demoTr('同步完成', 'Sync complete')} ✓');
       }),
     );
     _subs.add(
       _ring.onSyncError.listen((e) {
         setState(() => _syncing = false);
-        _log('同步错误: code=${e['code']}');
+        _log('${demoTr('同步错误', 'Sync error')}: code=${e['code']}');
       }),
     );
   }
@@ -59,10 +63,13 @@ class _SyncPageState extends State<SyncPage> {
     });
     try {
       await _ring.syncAllHealthData();
-      _log('同步指令已发送...');
+      _log(demoTr('同步指令已发送...', 'Sync command sent...'));
     } on RwfitException catch (e) {
       setState(() => _syncing = false);
-      _log('发送同步指令失败: [${e.code}] ${e.message}');
+      _log(
+        '${demoTr('发送同步指令失败', 'Failed to start sync')}: '
+        '[${e.code}] ${e.message}',
+      );
     }
   }
 
@@ -77,7 +84,7 @@ class _SyncPageState extends State<SyncPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('数据同步')),
+      appBar: AppBar(title: Text(demoTr('数据同步', 'Data sync'))),
       body: Column(
         children: [
           Padding(
@@ -89,7 +96,11 @@ class _SyncPageState extends State<SyncPage> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  _syncing ? '同步中...' : (_progress == 100 ? '同步完成' : '尚未同步'),
+                  _syncing
+                      ? demoTr('同步中...', 'Syncing...')
+                      : (_progress == 100
+                            ? demoTr('同步完成', 'Sync complete')
+                            : demoTr('尚未同步', 'Not synced')),
                 ),
                 const SizedBox(height: 16),
                 FilledButton(
@@ -99,8 +110,10 @@ class _SyncPageState extends State<SyncPage> {
                       : _startSync,
                   child: Text(
                     !widget.capabilities.supportsAnyHealthData
-                        ? '当前设备无可同步数据'
-                        : (_syncing ? '同步中...' : '开始同步'),
+                        ? demoTr('当前设备无可同步数据', 'No supported data to sync')
+                        : (_syncing
+                              ? demoTr('同步中...', 'Syncing...')
+                              : demoTr('开始同步', 'Start sync')),
                   ),
                 ),
               ],

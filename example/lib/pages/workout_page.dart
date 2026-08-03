@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:rwfit_ble/rwfit_ble.dart';
 
+import '../i18n.dart';
 import 'workout_running_page.dart';
 import 'workout_types.dart';
 
@@ -60,7 +61,10 @@ class _WorkoutPageState extends State<WorkoutPage> {
         await _openRunningPage(state);
       }
     } on RwfitException catch (error) {
-      _showMessage('查询运动状态失败：[${error.code}] ${error.message}');
+      _showMessage(
+        '${demoTr('查询运动状态失败', 'Failed to get workout state')}: '
+        '[${error.code}] ${error.message}',
+      );
     } finally {
       if (mounted && !_leaving) setState(() => _busy = false);
     }
@@ -76,13 +80,18 @@ class _WorkoutPageState extends State<WorkoutPage> {
         state = await _ring.getWorkoutState();
       }
       if (!state.isRunning) {
-        throw StateError('设备未进入运动状态');
+        throw StateError(
+          demoTr('设备未进入运动状态', 'The device did not enter workout mode'),
+        );
       }
       await _openRunningPage(state);
     } on RwfitException catch (error) {
-      _showMessage('开始运动失败：[${error.code}] ${error.message}');
+      _showMessage(
+        '${demoTr('开始运动失败', 'Failed to start workout')}: '
+        '[${error.code}] ${error.message}',
+      );
     } catch (error) {
-      _showMessage('开始运动失败：$error');
+      _showMessage('${demoTr('开始运动失败', 'Failed to start workout')}: $error');
     } finally {
       if (mounted && !_leaving) setState(() => _busy = false);
     }
@@ -111,11 +120,11 @@ class _WorkoutPageState extends State<WorkoutPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('选择运动类型'),
+        title: Text(demoTr('选择运动类型', 'Choose workout type')),
         actions: [
           IconButton(
             onPressed: _busy ? null : _openCurrentWorkout,
-            tooltip: '查询当前运动',
+            tooltip: demoTr('查询当前运动', 'Get current workout'),
             icon: const Icon(Icons.refresh),
           ),
         ],
