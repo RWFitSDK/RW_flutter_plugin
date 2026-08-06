@@ -53,7 +53,7 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
         EventChannel.StreamHandler, ActivityAware {
 
     private static final String TAG = "RwfitBlePlugin";
-    private static final String PLUGIN_VERSION = "0.0.3";
+    private static final String PLUGIN_VERSION = "0.0.4";
 
     private MethodChannel methodChannel;
     private EventChannel eventChannel;

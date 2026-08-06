@@ -49,7 +49,7 @@ dependencies:
   rwfit_ble:
     git:
       url: https://github.com/RWFitSDK/RW_flutter_plugin.git
-      ref: v0.0.3   # Pin the version; change this when upgrading
+      ref: v0.0.4   # Pin the version; change this when upgrading
   # Used by the permission example below. You may use the app's existing
   # permission-management solution instead.
   permission_handler: ^12.0.2
@@ -1196,6 +1196,12 @@ Future<void> connectAndRead() async {
 ---
 
 ## Flutter Plugin Revision History
+
+**v0.0.4_20260806** (2026.08.06)
+
+- Fixed `pubspec.yaml` comment parsing failures affecting GitHub dependencies in some environments
+- Added Chinese/English switching to the demo and refreshed the bilingual integration guides
+- Updated native SDK version guidance and public release contents
 
 **v0.0.3_20260731** (2026.07.31)
 

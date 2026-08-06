@@ -49,7 +49,7 @@ dependencies:
   rwfit_ble:
     git:
       url: https://github.com/RWFitSDK/RW_flutter_plugin.git
-      ref: v0.0.3   # 锁定版本，升级时改这里
+      ref: v0.0.4   # 锁定版本，升级时改这里
   # 下方权限申请示例使用；也可替换为 App 现有的权限管理方案
   permission_handler: ^12.0.2
 ```
@@ -1200,6 +1200,12 @@ Future<void> connectAndRead() async {
 ---
 
 ## Flutter 插件修订记录
+
+**v0.0.4_20260806** (2026.08.06)
+
+- 修复部分环境通过 GitHub 依赖解析 `pubspec.yaml` 注释失败的问题
+- Demo 新增中英文切换并完善双语集成文档
+- 更新原生 SDK 版本说明及公开仓库发布内容
 
 **v0.0.3_20260731** (2026.07.31)
 
