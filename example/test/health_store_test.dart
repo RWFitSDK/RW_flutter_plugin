@@ -154,4 +154,70 @@ void main() {
 
     expect(records, hasLength(3));
   });
+
+  test('keeps step total and every hourly item separately', () {
+    final records = DemoHealthStore.parseSyncResult(
+      const SyncResult(
+        type: HealthTypeId.step,
+        data: [
+          {
+            'time': 100,
+            'totalSteps': 300,
+            'totalDistance': 210,
+            'totalCalorie': 12000,
+            'items': [
+              {
+                'time': 100,
+                'index': 0,
+                'steps': 100,
+                'distance': 70,
+                'calorie': 4000,
+              },
+              {
+                'time': 3700,
+                'index': 1,
+                'steps': 200,
+                'distance': 140,
+                'calorie': 8000,
+              },
+            ],
+          },
+        ],
+      ),
+    );
+
+    expect(records, hasLength(3));
+    expect(records.first.isDailySummary, isTrue);
+    expect(records.first.valueText, '300 步');
+    expect(records.skip(1).every((record) => !record.isDailySummary), isTrue);
+    expect(records[1].valueText, '100 步');
+    expect(records[2].valueText, '200 步');
+    expect(records[2].measuredAtSec, 3700);
+  });
+
+  test('keeps muslim count total and every synchronized item separately', () {
+    final records = DemoHealthStore.parseSyncResult(
+      const SyncResult(
+        type: HealthTypeId.muslimCount,
+        data: [
+          {
+            'time': 100,
+            'totalCount': 60,
+            'items': [
+              {'time': 200, 'count': 20},
+              {'time': 300, 'count': 40},
+            ],
+          },
+        ],
+      ),
+    );
+
+    expect(records, hasLength(3));
+    expect(records.first.isDailySummary, isTrue);
+    expect(records.first.valueText, '60 次');
+    expect(records.skip(1).every((record) => !record.isDailySummary), isTrue);
+    expect(records[1].valueText, '20 次');
+    expect(records[2].valueText, '40 次');
+    expect(records[2].measuredAtSec, 300);
+  });
 }

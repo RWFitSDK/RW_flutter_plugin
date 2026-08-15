@@ -188,11 +188,26 @@ class DemoController extends ChangeNotifier {
     }
   }
 
-  List<DemoHealthRecord> recordsFor(String type) =>
-      List.unmodifiable(healthRecords[type] ?? const []);
+  List<DemoHealthRecord> recordsFor(String type) {
+    final records = healthRecords[type] ?? const [];
+    if (type != HealthTypeId.step && type != HealthTypeId.muslimCount) {
+      return List.unmodifiable(records);
+    }
+    return List.unmodifiable(records.where((record) => !record.isDailySummary));
+  }
 
-  DemoHealthRecord? latestFor(String type) =>
-      _realtimeRecords[type] ?? healthRecords[type]?.firstOrNull;
+  DemoHealthRecord? latestFor(String type) {
+    final realtime = _realtimeRecords[type];
+    if (realtime != null) return realtime;
+    final records = healthRecords[type];
+    if (records == null) return null;
+    if (type == HealthTypeId.step || type == HealthTypeId.muslimCount) {
+      for (final record in records) {
+        if (record.isDailySummary) return record;
+      }
+    }
+    return records.firstOrNull;
+  }
 
   void _appendHealthRecords(String type, List<DemoHealthRecord> incoming) {
     final sorted = [...?healthRecords[type], ...incoming]

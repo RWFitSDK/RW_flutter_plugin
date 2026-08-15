@@ -14,6 +14,8 @@ class DemoHealthRecord {
   final int measuredAtSec;
   final Map<String, dynamic> values;
 
+  bool get isDailySummary => values['dailySummary'] == true;
+
   String get valueText => switch (type) {
     HealthTypeId.step => demoTr(
       '${_integer(values['steps'])} 步',
@@ -123,9 +125,25 @@ class DemoHealthStore {
               'steps': _integer(day['totalSteps']),
               'distanceMeters': _integer(day['totalDistance']),
               'calories': _number(day['totalCalorie']),
+              'dailySummary': true,
             },
           ),
         );
+        final items = day['items'] as List? ?? const [];
+        for (final rawItem in items) {
+          if (rawItem is! Map) continue;
+          records.add(
+            DemoHealthRecord(
+              type: result.type,
+              measuredAtSec: _positiveOrFallback(rawItem['time'], dayTime),
+              values: {
+                'steps': _integer(rawItem['steps']),
+                'distanceMeters': _integer(rawItem['distance']),
+                'calories': _number(rawItem['calorie']),
+              },
+            ),
+          );
+        }
         continue;
       }
       if (result.type == HealthTypeId.sleep) {
@@ -157,9 +175,23 @@ class DemoHealthStore {
           DemoHealthRecord(
             type: result.type,
             measuredAtSec: dayTime,
-            values: {'count': _integer(day['totalCount'])},
+            values: {
+              'count': _integer(day['totalCount']),
+              'dailySummary': true,
+            },
           ),
         );
+        final items = day['items'] as List? ?? const [];
+        for (final rawItem in items) {
+          if (rawItem is! Map) continue;
+          records.add(
+            DemoHealthRecord(
+              type: result.type,
+              measuredAtSec: _positiveOrFallback(rawItem['time'], dayTime),
+              values: {'count': _integer(rawItem['count'])},
+            ),
+          );
+        }
         continue;
       }
 
