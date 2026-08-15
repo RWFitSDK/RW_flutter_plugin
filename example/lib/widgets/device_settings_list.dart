@@ -1006,33 +1006,22 @@ class _DeviceSettingsListState extends State<DeviceSettingsList> {
 
   Future<String?> _editTime() async {
     if (!mounted) return null;
-    final controller = TextEditingController();
-    final value = await showDialog<String>(
+    final selected = await showTimePicker(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(demoTr('新增闹钟', 'Add alarm')),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          keyboardType: TextInputType.datetime,
-          decoration: InputDecoration(
-            hintText: demoTr('输入时间，例如 07:30', 'Enter a time, e.g. 07:30'),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(demoTr('取消', 'Cancel')),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text.trim()),
-            child: Text(demoTr('确定', 'OK')),
-          ),
-        ],
+      initialTime: TimeOfDay.now(),
+      helpText: demoTr('新增闹钟', 'Add alarm'),
+      cancelText: demoTr('取消', 'Cancel'),
+      confirmText: demoTr('确定', 'OK'),
+      hourLabelText: demoTr('小时', 'Hour'),
+      minuteLabelText: demoTr('分钟', 'Minute'),
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true),
+        child: child!,
       ),
     );
-    controller.dispose();
-    return value;
+    if (selected == null) return null;
+    return '${selected.hour.toString().padLeft(2, '0')}:'
+        '${selected.minute.toString().padLeft(2, '0')}';
   }
 
   void _toast(String message) {

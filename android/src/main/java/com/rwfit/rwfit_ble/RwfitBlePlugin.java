@@ -1105,7 +1105,14 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
                 DHBleSdk.INSTANCE.dispose(this);
             }
             @Override public void onFail(int errorCode) { result.error(errorCode, "getAlarm failed"); DHBleSdk.INSTANCE.dispose(this); }
-            @Override public void onSuccess() {}
+            @Override public void onSuccess() {
+                // 设备中没有闹钟时只返回 3 字节 ACK，原生 SDK 因而只回调
+                // onSuccess，不会回调 onResult(emptyList)。统一转换为空列表返回 Flutter。
+                Map<String, Object> r = success();
+                r.put("data", new ArrayList<>());
+                result.success(r);
+                DHBleSdk.INSTANCE.dispose(this);
+            }
         });
         DHBleSdk.INSTANCE.getAlarmRemindJL();
     }
