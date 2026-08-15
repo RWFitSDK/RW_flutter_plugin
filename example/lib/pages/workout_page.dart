@@ -3,20 +3,25 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:rwfit_ble/rwfit_ble.dart';
 
+import '../demo_controller.dart';
+import '../demo_theme.dart';
 import '../i18n.dart';
 import 'workout_running_page.dart';
 import 'workout_types.dart';
 
 /// 多运动类型页，对应 Android Demo 的 WorkoutTypeActivity。
 class WorkoutPage extends StatefulWidget {
-  const WorkoutPage({super.key});
+  const WorkoutPage({super.key, required this.controller});
+
+  final DemoController controller;
 
   @override
   State<WorkoutPage> createState() => _WorkoutPageState();
 }
 
 class _WorkoutPageState extends State<WorkoutPage> {
-  final _ring = RwfitBle.instance;
+  RwfitBle get _ring => widget.controller.ring;
+
   StreamSubscription<ConnectStateEvent>? _connectSub;
 
   bool _busy = false;
@@ -54,6 +59,10 @@ class _WorkoutPageState extends State<WorkoutPage> {
 
   Future<void> _openCurrentWorkout() async {
     if (_busy || _leaving) return;
+    if (!widget.controller.connected) {
+      _showMessage(demoTr('请先连接设备', 'Connect the device first'));
+      return;
+    }
     setState(() => _busy = true);
     try {
       final state = await _ring.getWorkoutState();
@@ -72,6 +81,10 @@ class _WorkoutPageState extends State<WorkoutPage> {
 
   Future<void> _selectWorkout(int sportType) async {
     if (_busy || _leaving) return;
+    if (!widget.controller.connected) {
+      _showMessage(demoTr('请先连接设备', 'Connect the device first'));
+      return;
+    }
     setState(() => _busy = true);
     try {
       var state = await _ring.getWorkoutState();
@@ -101,7 +114,10 @@ class _WorkoutPageState extends State<WorkoutPage> {
     if (!mounted || _leaving) return;
     final message = await Navigator.of(context).push<String>(
       MaterialPageRoute(
-        builder: (_) => WorkoutRunningPage(initialState: state),
+        builder: (_) => WorkoutRunningPage(
+          controller: widget.controller,
+          initialState: state,
+        ),
       ),
     );
     if (message != null && mounted && !_leaving) {
@@ -131,17 +147,62 @@ class _WorkoutPageState extends State<WorkoutPage> {
       ),
       body: Stack(
         children: [
-          ListView.separated(
-            itemCount: workoutTypeNames.length,
-            separatorBuilder: (_, _) => const Divider(height: 1),
+          ListView.builder(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
+            itemCount: workoutTypeNames.length + 2,
             itemBuilder: (context, index) {
-              final sportType = workoutTypeStart + index;
-              return ListTile(
-                leading: CircleAvatar(child: Text('$sportType')),
-                title: Text(workoutTypeNames[index]),
-                trailing: const Icon(Icons.chevron_right),
-                enabled: !_busy,
-                onTap: _busy ? null : () => _selectWorkout(sportType),
+              if (index == 0) return _introCard();
+              if (index == 1) {
+                return SectionHeading(
+                  demoTr('运动类型', 'Workout types'),
+                  caption: demoTr(
+                    '${workoutTypeNames.length} 项',
+                    '${workoutTypeNames.length} available',
+                  ),
+                );
+              }
+              final workoutIndex = index - 2;
+              final sportType = workoutTypeStart + workoutIndex;
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Card(
+                  child: ListTile(
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 3,
+                    ),
+                    leading: Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: DemoColors.primary.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(
+                        Icons.directions_run,
+                        color: DemoColors.primary,
+                        size: 21,
+                      ),
+                    ),
+                    title: Text(
+                      workoutTypeNames[workoutIndex],
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    subtitle: Text(
+                      'ID $sportType',
+                      style: const TextStyle(
+                        color: DemoColors.secondaryText,
+                        fontSize: 12,
+                      ),
+                    ),
+                    trailing: const Icon(
+                      Icons.chevron_right,
+                      color: DemoColors.secondaryText,
+                    ),
+                    enabled: !_busy,
+                    onTap: _busy ? null : () => _selectWorkout(sportType),
+                  ),
+                ),
               );
             },
           ),
@@ -156,4 +217,50 @@ class _WorkoutPageState extends State<WorkoutPage> {
       ),
     );
   }
+
+  Widget _introCard() => Card(
+    child: Padding(
+      padding: const EdgeInsets.all(18),
+      child: Row(
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: DemoColors.primary.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(15),
+            ),
+            child: const Icon(
+              Icons.directions_run,
+              color: DemoColors.primary,
+              size: 26,
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  demoTr('选择一项运动开始记录', 'Choose a workout to begin'),
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  demoTr(
+                    '运动由戒指记录，进行中可暂停、继续或结束。',
+                    'The ring records your workout. Pause, resume, or end it at any time.',
+                  ),
+                  style: const TextStyle(
+                    color: DemoColors.secondaryText,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }

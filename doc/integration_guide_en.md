@@ -49,7 +49,7 @@ dependencies:
   rwfit_ble:
     git:
       url: https://github.com/RWFitSDK/RW_flutter_plugin.git
-      ref: v0.0.4   # Pin the version; change this when upgrading
+      ref: v0.0.5   # Pin the version; change this when upgrading
   # Used by the permission example below. You may use the app's existing
   # permission-management solution instead.
   permission_handler: ^12.0.2
@@ -701,13 +701,18 @@ await ring.startRealtimeMeasure(RealtimeMetric.hr);
 | `RealtimeMetric.pressure` | Stress |
 | `RealtimeMetric.bloodSugar` | Blood sugar |
 | `RealtimeMetric.bloodPressure` | Blood pressure |
+| `RealtimeMetric.temperature` | Body temperature |
+
+The protocol reports real-time body temperature at 10 times the actual value.
+The Android and iOS bridges normalize it, so `RealtimeData.value` directly returns
+the temperature in degrees Celsius, for example `36.5`.
 
 **`RealtimeData` fields:**
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `type` | `HealthType?` | Data type |
-| `value` | `double` | Primary value; blood sugar retains decimal precision, while integer-valued measurements use `.0` |
+| `value` | `double` | Primary value; blood sugar retains decimal precision, body temperature is the actual Celsius value, and other integer-valued measurements use `.0` |
 | `diastolic` | `int?` | Diastolic pressure, only for blood-pressure measurements |
 | `timestampSec` | `int` | Unix timestamp in seconds, normalized across Android and iOS |
 | `timestampMs` | `int` | **Deprecated compatibility getter**, equal to `timestampSec * 1000`; do not use in new code |
@@ -721,6 +726,8 @@ await ring.startRealtimeMeasure(RealtimeMetric.hr);
 | `HealthType.bloodBp` | 4 | Blood pressure |
 | `HealthType.pressure` | 8 | Stress |
 | `HealthType.bloodSugar` | 9 | Blood sugar |
+| `HealthType.muslimCount` | 10 | Real-time Muslim count |
+| `HealthType.temperature` | 11 | Real-time body temperature (°C) |
 | `HealthType.hrv` | 13 | HRV |
 
 ##### 3.2.2.2 Configure All-Day Health Monitoring Intervals
@@ -1196,6 +1203,11 @@ Future<void> connectAndRead() async {
 ---
 
 ## Flutter Plugin Revision History
+
+**v0.0.5_20260815** (2026.08.15)
+
+- Added real-time prayer-count reporting
+- Added single real-time body-temperature measurement and normalized Android/iOS values to degrees Celsius
 
 **v0.0.4_20260806** (2026.08.06)
 

@@ -65,7 +65,7 @@
     } else if ([m isEqualToString:@"getSDKVersion"]) {
         [self ok:result extra:@{@"version": [DHBleCommand getSDKVersion] ?: @""}];
     } else if ([m isEqualToString:@"getPluginVersion"]) {
-        NSString *v = [NSString stringWithFormat:@"0.0.4_%@", [DHBleCommand getSDKVersion] ?: @""];
+        NSString *v = [NSString stringWithFormat:@"0.0.5_%@", [DHBleCommand getSDKVersion] ?: @""];
         [self ok:result extra:@{@"pluginVersion": v}];
     } else if ([m isEqualToString:@"isBleConnected"]) {
         [self ok:result extra:@{@"connected": @([DHBleCentralManager isConnected])}];
@@ -665,7 +665,8 @@
             @"JL_HRV_DATA_TRANSFER_KEY": @(BLE_KEY_HRV),
             @"JL_PRESSURE_DATA_TRANSFER_KEY": @(BLE_KEY_STRESS),
             @"JL_BLOODSUGAR_DATA_TRANSFER_KEY": @(BLE_KEY_BLOOD_SUGAR),
-            @"JL_BP_DATA_TRANSFER_KEY": @(BLE_KEY_BLOOD_PRESSURE)
+            @"JL_BP_DATA_TRANSFER_KEY": @(BLE_KEY_BLOOD_PRESSURE),
+            @"JL_TEMP_DATA_TRANSFER_KEY": @(BLE_KEY_TEMPERATURE)
         };
     });
     return mapping[key];
@@ -722,6 +723,8 @@
         case BLE_KEY_APP_REAL_TIME_BP_DATA:           dataType = 4;  break;
         case BLE_KEY_APP_REAL_TIME_STRESS_DATA:       dataType = 8;  break;
         case BLE_KEY_APP_REAL_BLOOD_SUGAR_DATA:       dataType = 9;  break;
+        case BLE_KEY_APP_REAL_TIME_MUSLIM_COUNT:      dataType = 10; break;
+        case BLE_KEY_APP_REAL_TIME_TEMPERATURE_DATA:  dataType = 11; break;
         case BLE_KEY_APP_REAL_TIME_HRV_DATA:          dataType = 13; break;
         default: return;
     }
@@ -733,6 +736,8 @@
     if (dataType == 4) {
         event[@"dataValue"] = userInfo[@"systolic"] ?: @0;
         event[@"diastolic"] = userInfo[@"diastolic"] ?: @0;
+    } else if (dataType == 11) {
+        event[@"dataValue"] = @([userInfo[@"dataValue"] doubleValue] / 10.0);
     } else {
         event[@"dataValue"] = userInfo[@"dataValue"] ?: @0;
     }

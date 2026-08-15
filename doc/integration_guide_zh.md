@@ -49,7 +49,7 @@ dependencies:
   rwfit_ble:
     git:
       url: https://github.com/RWFitSDK/RW_flutter_plugin.git
-      ref: v0.0.4   # 锁定版本，升级时改这里
+      ref: v0.0.5   # 锁定版本，升级时改这里
   # 下方权限申请示例使用；也可替换为 App 现有的权限管理方案
   permission_handler: ^12.0.2
 ```
@@ -705,13 +705,17 @@ await ring.startRealtimeMeasure(RealtimeMetric.hr);
 | `RealtimeMetric.pressure` | 压力 |
 | `RealtimeMetric.bloodSugar` | 血糖 |
 | `RealtimeMetric.bloodPressure` | 血压 |
+| `RealtimeMetric.temperature` | 体温 |
+
+体温实时上报的协议原始值为实际温度的 10 倍；Android/iOS 桥接已统一换算，
+`RealtimeData.value` 直接返回摄氏度实际值，例如 `36.5`。
 
 **`RealtimeData` 字段：**
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `type` | `HealthType?` | 数据类型枚举 |
-| `value` | `double` | 测量主值；血糖保留小数，其他测量值以 `.0` 表示 |
+| `value` | `double` | 测量主值；血糖保留小数，体温为摄氏度实际值，其他整数测量值以 `.0` 表示 |
 | `diastolic` | `int?` | 舒张压（仅血压测量时有值） |
 | `timestampSec` | `int` | 测量时间戳，Unix 秒（Android/iOS 已由桥接层统一） |
 | `timestampMs` | `int` | **已废弃兼容 getter**，等于 `timestampSec * 1000`；新代码不要使用 |
@@ -725,6 +729,8 @@ await ring.startRealtimeMeasure(RealtimeMetric.hr);
 | `HealthType.bloodBp` | 4 | 血压 |
 | `HealthType.pressure` | 8 | 压力 |
 | `HealthType.bloodSugar` | 9 | 血糖 |
+| `HealthType.muslimCount` | 10 | 赞念实时计数 |
+| `HealthType.temperature` | 11 | 实时体温（℃） |
 | `HealthType.hrv` | 13 | HRV |
 
 ##### 3.2.2.2 全天检测-设置健康数据全天监听间隔
@@ -1200,6 +1206,11 @@ Future<void> connectAndRead() async {
 ---
 
 ## Flutter 插件修订记录
+
+**v0.0.5_20260815** (2026.08.15)
+
+- 新增赞念计数实时上报
+- 新增体温单次实时测量，统一 Android/iOS 实时体温值为摄氏度
 
 **v0.0.4_20260806** (2026.08.06)
 

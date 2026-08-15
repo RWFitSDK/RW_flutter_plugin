@@ -12,7 +12,8 @@ The example app supports Chinese and English, with a language switch in the
 upper-right corner.
 
 <p align="center">
-  <img src=".github/assets/IMG_0378.PNG" alt="RWFit Flutter demo running on iOS" width="360">
+  <img src=".github/assets/demo-home.PNG" alt="RWFit Flutter demo home page on iOS" width="360">
+  <img src=".github/assets/demo-device.PNG" alt="RWFit Flutter demo device page on iOS" width="360">
 </p>
 
 ## 文档 / Documentation

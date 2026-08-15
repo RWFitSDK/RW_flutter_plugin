@@ -205,8 +205,10 @@ class RwfitBle {
   Stream<CallControlEvent> get onCallControl =>
       onEvent(RwfitEvents.callControl).map(CallControlEvent.fromMap);
 
-  Future<bool> getMuslimCountEnabled() async =>
-      (await callAsync('getMuslimCountEnabled'))['enabled'] as bool;
+  Future<bool> getMuslimCountEnabled() async {
+    final enabled = (await callAsync('getMuslimCountEnabled'))['enabled'];
+    return enabled == true || (enabled is num && enabled != 0);
+  }
 
   Future<void> setMuslimCountEnabled(bool enabled) =>
       callAsync('setMuslimCountEnabled', {'enabled': enabled});

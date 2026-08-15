@@ -6,6 +6,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:rwfit_ble/rwfit_ble.dart';
 
 import 'i18n.dart';
+import 'demo_theme.dart';
 import 'pages/home_page.dart';
 
 void main() => runApp(const MyApp());
@@ -35,7 +36,7 @@ class _MyAppState extends State<MyApp> {
         locale: Locale(_language.name),
         supportedLocales: const [Locale('zh'), Locale('en')],
         localizationsDelegates: GlobalMaterialLocalizations.delegates,
-        theme: ThemeData(colorSchemeSeed: Colors.teal, useMaterial3: true),
+        theme: buildDemoTheme(),
         home: const PermissionGate(),
       ),
     );

@@ -11,6 +11,8 @@ enum HealthType {
   bloodBp(4),
   pressure(8),
   bloodSugar(9),
+  muslimCount(10),
+  temperature(11),
   hrv(13);
 
   const HealthType(this.value);
@@ -31,7 +33,8 @@ enum RealtimeMetric {
   hrv('JL_HRV_DATA_TRANSFER_KEY'),
   pressure('JL_PRESSURE_DATA_TRANSFER_KEY'),
   bloodSugar('JL_BLOODSUGAR_DATA_TRANSFER_KEY'),
-  bloodPressure('JL_BP_DATA_TRANSFER_KEY');
+  bloodPressure('JL_BP_DATA_TRANSFER_KEY'),
+  temperature('JL_TEMP_DATA_TRANSFER_KEY');
 
   const RealtimeMetric(this.key);
   final String key;

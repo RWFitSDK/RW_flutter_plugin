@@ -1,29 +1,19 @@
-import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:rwfit_ble/rwfit_ble.dart';
 
-import '../device_store.dart';
+import '../demo_controller.dart';
+import '../demo_theme.dart';
+import '../health_metadata.dart';
+import '../health_store.dart';
 import '../i18n.dart';
-import '../support_menu.dart';
-import 'device_info_page.dart';
-import 'timed_monitor_page.dart';
-import 'realtime_page.dart';
-import 'control_page.dart';
-import 'alarm_page.dart';
-import 'sync_page.dart';
-import 'ota_page.dart';
-import 'notify_page.dart';
+import '../widgets/device_card.dart';
+import 'device_page.dart';
+import 'health_history_page.dart';
 import 'scan_page.dart';
 import 'workout_page.dart';
-import 'health_alert_page.dart';
-import 'sensor_raw_page.dart';
 
-/// 功能主页 / 落地页（对标 index.vue）：连接管理 + 各功能子页入口。
-///
-/// 启动即进此页：加载本地保存的设备，提供「扫描设备 / 重连 / 断开」，
-/// 收到 `onFunctionMenu`（就绪）后才放行下方功能分区，并持久化当前设备供下次重连。
+/// 对齐微信小程序 Demo 的首页/设备双导航壳。
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -32,274 +22,182 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  final _ring = RwfitBle.instance;
-  final _subs = <StreamSubscription>[];
-  bool _ready = false;
-  DemoCapabilities _capabilities = const DemoCapabilities.empty();
-  String _conn = 'disconnected';
-  BleDevice? _saved;
+  late final DemoController _controller;
+  int _tabIndex = 0;
 
   @override
   void initState() {
     super.initState();
-    _subs.add(
-      _ring.onConnectState.listen((e) {
-        setState(() => _conn = e.state.name);
-        if (e.state == ConnectState.disconnected ||
-            e.state == ConnectState.failed) {
-          setState(() {
-            _ready = false;
-            _capabilities = const DemoCapabilities.empty();
-          });
-        }
-      }),
-    );
-    _subs.add(
-      _ring.onFunctionMenu.listen((menu) async {
-        setState(() {
-          _ready = true;
-          _capabilities = DemoCapabilities(
-            Map<String, dynamic>.unmodifiable(menu.raw),
-          );
-          _conn = 'connected';
-        });
-        // 连接就绪 → 持久化当前设备供下次重连；iOS 置绑定态以启用内置重连。
-        final device = BleDevice(
-          name: menu.name,
-          mac: menu.mac,
-          rssi: 0,
-          uuid: menu.uuid,
-        );
-        await DeviceStore.save(device);
-        await _ring.iosSetBindedStatus(true);
-        if (mounted) setState(() => _saved = device);
-      }),
-    );
-    _loadSaved();
+    _controller = DemoController()..addListener(_refreshFromController);
   }
 
-  Future<void> _loadSaved() async {
-    final d = await DeviceStore.load();
-    if (mounted) setState(() => _saved = d);
+  void _refreshFromController() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
-    for (final s in _subs) {
-      s.cancel();
-    }
+    _controller.removeListener(_refreshFromController);
+    _controller.dispose();
     super.dispose();
   }
 
   Future<void> _openScan() async {
+    try {
+      if (Platform.isIOS) {
+        await _controller.ring.iosSetBindedStatus(false);
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '${demoTr('准备换绑失败', 'Failed to prepare device switching')}: $error',
+            ),
+          ),
+        );
+      }
+      return;
+    }
+    if (!mounted) return;
     await Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => const ScanPage()),
     );
-    // 从扫描页返回后刷新已保存设备（可能刚连上新设备）。
-    if (mounted) _loadSaved();
-  }
-
-  Future<void> _reconnect() async {
-    final saved = _saved;
-    if (saved == null) return;
-    if (await _ring.isConnected()) {
-      _toast(demoTr('设备已连接', 'Device is already connected'));
-      return;
-    }
-    setState(() => _conn = 'connecting');
-    try {
-      await _ring.reconnect(saved);
-      _toast(
-        '${demoTr('重连指令已发送', 'Reconnect command sent')}: '
-        '${saved.name.isEmpty ? saved.mac : saved.name}',
-      );
-    } catch (e) {
-      _toast('${demoTr('重连失败', 'Reconnect failed')}: $e');
-    }
-  }
-
-  Future<void> _disconnect() async {
-    try {
-      await _ring.disconnect();
-      // 仅断开，不清除已保存设备（仍可重连）。
-      setState(() {
-        _conn = 'disconnected';
-        _ready = false;
-        _capabilities = const DemoCapabilities.empty();
-      });
-    } catch (e) {
-      _toast('${demoTr('断开失败', 'Disconnect failed')}: $e');
-    }
-  }
-
-  void _toast(String msg) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
-  }
-
-  void _push(Widget page) {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => page));
   }
 
   @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(
+      title: Text(demoTr('RW 健康', 'RW Health')),
+      actions: [
+        TextButton(
+          onPressed: context.toggleLanguage,
+          child: Text(
+            context.language == DemoLanguage.zh ? 'EN' : '中文',
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+        ),
+        const SizedBox(width: 4),
+      ],
+    ),
+    body: IndexedStack(
+      index: _tabIndex,
+      children: [
+        _HomeDashboard(
+          controller: _controller,
+          openScan: _openScan,
+          openDevice: () => setState(() => _tabIndex = 1),
+        ),
+        DevicePage(controller: _controller, openScan: _openScan),
+      ],
+    ),
+    bottomNavigationBar: NavigationBar(
+      selectedIndex: _tabIndex,
+      onDestinationSelected: (index) => setState(() => _tabIndex = index),
+      destinations: [
+        NavigationDestination(
+          icon: const Icon(Icons.home_outlined),
+          selectedIcon: const Icon(Icons.home),
+          label: demoTr('首页', 'Home'),
+        ),
+        NavigationDestination(
+          icon: const Icon(Icons.watch_outlined),
+          selectedIcon: const Icon(Icons.watch),
+          label: demoTr('设备', 'Device'),
+        ),
+      ],
+    ),
+  );
+}
+
+class _HomeDashboard extends StatelessWidget {
+  const _HomeDashboard({
+    required this.controller,
+    required this.openScan,
+    required this.openDevice,
+  });
+
+  final DemoController controller;
+  final Future<void> Function() openScan;
+  final VoidCallback openDevice;
+
+  @override
   Widget build(BuildContext context) {
-    final connection = switch (_conn) {
-      'connected' => demoTr('已连接', 'Connected'),
-      'connecting' => demoTr('连接中', 'Connecting'),
-      'failed' => demoTr('连接失败', 'Connection failed'),
-      _ => demoTr('未连接', 'Disconnected'),
-    };
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(demoTr('RWFIT 戒指', 'RWFIT Ring')),
-        actions: [
-          Tooltip(
-            message: context.language == DemoLanguage.zh
-                ? 'Switch to English'
-                : '切换到中文',
-            child: TextButton(
-              onPressed: context.toggleLanguage,
-              child: Text(
-                context.language == DemoLanguage.zh ? 'EN' : '中文',
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-            ),
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            color: _ready ? Colors.green.shade50 : Colors.orange.shade50,
-            child: Text(
-              '${demoTr('连接状态', 'Connection')}: $connection'
-              '${_ready ? demoTr(' (已就绪)', ' (Ready)') : ''}',
-              style: TextStyle(
-                color: _ready ? Colors.green.shade800 : Colors.orange.shade800,
-              ),
-            ),
-          ),
-          _connectionPanel(),
-          const Divider(height: 1),
-          Expanded(
-            child: ListView(
+    final device = controller.device;
+    final supported = demoHealthDefinitions
+        .where(
+          (definition) => controller.capabilities.has(definition.capabilityKey),
+        )
+        .toList();
+    return RefreshIndicator(
+      onRefresh: () => _sync(context),
+      child: CustomScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        slivers: [
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+            sliver: SliverList.list(
               children: [
-                _tile(
-                  demoTr('设备信息', 'Device info'),
-                  demoTr(
-                    '电量/固件/用户信息/时间格式',
-                    'Battery / firmware / user info / time format',
-                  ),
-                  Icons.info_outline,
-                  () => _push(const DeviceInfoPage()),
-                ),
-                _tile(
-                  demoTr('全天检测', 'All-day monitoring'),
-                  demoTr(
-                    '心率/血氧/HRV/压力/血糖/血压/体温/PPG',
-                    'Heart rate / SpO₂ / HRV / stress / glucose / BP / temperature / PPG',
-                  ),
-                  Icons.monitor_heart,
-                  () => _push(TimedMonitorPage(capabilities: _capabilities)),
-                  enabled: _ready && _capabilities.supportsAnyTimedMonitor,
-                ),
-                _tile(
-                  demoTr('实时测量', 'Real-time measurement'),
-                  demoTr(
-                    '实时心率/血氧/血压等（互斥）',
-                    'Real-time heart rate / SpO₂ / BP (mutually exclusive)',
-                  ),
-                  Icons.favorite,
-                  () => _push(RealtimePage(capabilities: _capabilities)),
-                  enabled: _ready && _capabilities.supportsAnyRealtime,
-                ),
-                _tile(
-                  demoTr('设备控制', 'Device controls'),
-                  demoTr(
-                    '找设备/关机/拍照/LED/佩戴/振动',
-                    'Find device / power / camera / LED / wearing / vibration',
-                  ),
-                  Icons.settings_remote,
-                  () => _push(ControlPage(capabilities: _capabilities)),
-                  enabled:
-                      _ready &&
-                      (_capabilities.supportsAnyDeviceControl ||
-                          Platform.isAndroid),
-                ),
-                _tile(
-                  demoTr('赞念与健康报警', 'Prayer & health alerts'),
-                  demoTr(
-                    '赞念开关 / 心率和血氧报警 / 实时报警事件',
-                    'Prayer count / heart rate and SpO₂ alerts / live events',
-                  ),
-                  Icons.health_and_safety_outlined,
-                  () => _push(HealthAlertPage(capabilities: _capabilities)),
-                  enabled: _ready && _capabilities.supportsAnyHealthAlert,
-                ),
-                _tile(
-                  demoTr('传感器原始数据', 'Raw sensor data'),
-                  demoTr(
-                    'PPG / ACC / Red / IR / 睡眠状态',
-                    'PPG / ACC / Red / IR / sleep state',
-                  ),
-                  Icons.sensors,
-                  () => _push(SensorRawPage(capabilities: _capabilities)),
-                  enabled: _ready && _capabilities.supportsAnySensorRaw,
-                ),
-                _tile(
-                  demoTr('闹钟', 'Alarms'),
-                  demoTr(
-                    '查询/设置/删除（全量下发）',
-                    'Read / set / delete (full replacement)',
-                  ),
-                  Icons.alarm,
-                  () => _push(AlarmPage(capabilities: _capabilities)),
-                  enabled: _ready && _capabilities.has(DemoCapabilityKey.alarm),
-                ),
-                _tile(
-                  demoTr('数据同步', 'Data sync'),
-                  demoTr('历史健康数据同步', 'Historical health data sync'),
-                  Icons.sync,
-                  () => _push(SyncPage(capabilities: _capabilities)),
-                  enabled: _ready && _capabilities.supportsAnyHealthData,
-                ),
-                _tile(
-                  demoTr('多运动', 'Workouts'),
-                  _capabilities.supportsWorkout
-                      ? demoTr(
-                          '运动类型选择 / 实时运动控制与数据',
-                          'Workout selection / live controls and data',
-                        )
-                      : demoTr('当前设备不支持多运动', 'Workout mode is not supported'),
-                  Icons.directions_run,
-                  () => _push(const WorkoutPage()),
-                  enabled: _ready && _capabilities.supportsWorkout,
-                ),
-                _tile(
-                  demoTr('OTA 升级', 'OTA upgrade'),
-                  demoTr('固件升级', 'Firmware upgrade'),
-                  Icons.system_update,
-                  () => _push(const OtaPage()),
-                ),
-                _tile(
-                  demoTr('消息/通知', 'Messages / notifications'),
-                  demoTr(
-                    'Android 推送 / iOS ANCS 开关',
-                    'Android messages / iOS ANCS settings',
-                  ),
-                  Icons.notifications,
-                  () => _push(NotifyPage(capabilities: _capabilities)),
-                  enabled:
-                      _ready &&
-                      _capabilities.has(
-                        Platform.isAndroid
-                            ? DemoCapabilityKey.pushMessage
-                            : DemoCapabilityKey.pushMessageSwitch,
+                if (device != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Center(
+                      child: Text(
+                        demoTr('下拉可刷新', 'Pull down to refresh'),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: DemoColors.secondaryText,
+                        ),
                       ),
+                    ),
+                  ),
+                if (device == null)
+                  _unboundCard(context)
+                else
+                  DemoDeviceCard(
+                    device: device,
+                    connectionState: controller.connectionState,
+                    ready: controller.ready,
+                    powerLevel: controller.powerLevel,
+                    onTap: openDevice,
+                  ),
+                SectionHeading(
+                  demoTr('健康数据', 'Health data'),
+                  caption: device == null ? null : _syncCaption(),
                 ),
+                if (controller.syncing) ...[
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(99),
+                    child: LinearProgressIndicator(
+                      value: controller.syncProgress,
+                      minHeight: 5,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                if (supported.isEmpty)
+                  DemoEmptyCard(
+                    title: device == null
+                        ? demoTr('绑定后显示健康数据', 'Bind a ring to see health data')
+                        : demoTr('暂未获得健康能力', 'No health capabilities yet'),
+                    message: device == null
+                        ? demoTr(
+                            '首页会根据设备功能表展示计步、心率、睡眠、多运动等支持项目。',
+                            'Supported health metrics appear here based on the device capability table.',
+                          )
+                        : demoTr(
+                            '请先在设备页重新连接，获取设备功能配置表。',
+                            'Reconnect on the Device tab to refresh capabilities.',
+                          ),
+                    action: device == null
+                        ? FilledButton(
+                            onPressed: openScan,
+                            child: Text(demoTr('添加设备', 'Add device')),
+                          )
+                        : null,
+                  )
+                else
+                  _healthGrid(context, supported),
               ],
             ),
           ),
@@ -308,69 +206,230 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _connectionPanel() {
-    final saved = _saved;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            demoTr('连接管理', 'Connection'),
-            style: const TextStyle(fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 8),
-          if (saved != null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Text(
-                '${demoTr('已保存设备', 'Saved device')}: '
-                '${saved.name.isEmpty ? demoTr('(未命名)', '(Unnamed)') : saved.name}'
-                ' (${saved.uuid ?? saved.mac})',
-                style: TextStyle(fontSize: 13, color: Colors.blueGrey.shade700),
+  Widget _unboundCard(BuildContext context) => Card(
+    child: InkWell(
+      borderRadius: BorderRadius.circular(18),
+      onTap: openScan,
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Row(
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                color: Color(0xFFE4F4ED),
+              ),
+              child: const Icon(Icons.add, color: DemoColors.primary),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    demoTr('未绑定设备', 'No bound device'),
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    demoTr(
+                      '点击搜索并连接 RW 智能戒指',
+                      'Search for and connect an RW smart ring',
+                    ),
+                    style: const TextStyle(color: DemoColors.secondaryText),
+                  ),
+                ],
               ),
             ),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
+            const Icon(Icons.chevron_right, color: DemoColors.secondaryText),
+          ],
+        ),
+      ),
+    ),
+  );
+
+  Widget _healthGrid(
+    BuildContext context,
+    List<DemoHealthDefinition> definitions,
+  ) => LayoutBuilder(
+    builder: (context, constraints) {
+      final columns = constraints.maxWidth >= 700 ? 3 : 2;
+      final spacing = 12.0;
+      final width = (constraints.maxWidth - spacing * (columns - 1)) / columns;
+      return Wrap(
+        spacing: spacing,
+        runSpacing: spacing,
+        children: [
+          for (final definition in definitions)
+            SizedBox(
+              width: width,
+              child: _HealthCard(
+                definition: definition,
+                record: controller.latestFor(definition.type),
+                onTap: () {
+                  if (definition.type == HealthTypeId.workout) {
+                    if (!controller.connected) {
+                      _toast(
+                        context,
+                        demoTr('请先连接设备', 'Connect the device first'),
+                      );
+                      return;
+                    }
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => WorkoutPage(controller: controller),
+                      ),
+                    );
+                    return;
+                  }
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => HealthHistoryPage(
+                        controller: controller,
+                        definition: definition,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+        ],
+      );
+    },
+  );
+
+  Future<void> _sync(BuildContext context) async {
+    if (controller.device == null) {
+      _toast(context, demoTr('请先绑定设备', 'Bind a device first'));
+      return;
+    }
+    if (controller.syncing) return;
+    try {
+      await controller.syncAllHealthData();
+      if (context.mounted) {
+        _toast(context, demoTr('同步完成', 'Sync complete'));
+      }
+    } catch (error) {
+      if (context.mounted) {
+        _toast(context, '${demoTr('同步失败', 'Sync failed')}: $error');
+      }
+    }
+  }
+
+  String? _syncCaption() {
+    if (controller.syncing) {
+      return demoTr(
+        '正在同步 ${(controller.syncProgress * 100).round()}%',
+        'Syncing ${(controller.syncProgress * 100).round()}%',
+      );
+    }
+    final time = controller.lastSyncAt;
+    if (time == null) return null;
+    return demoTr(
+      '上次同步 ${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}',
+      'Last sync ${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}',
+    );
+  }
+
+  void _toast(BuildContext context, String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+}
+
+class _HealthCard extends StatelessWidget {
+  const _HealthCard({
+    required this.definition,
+    required this.record,
+    required this.onTap,
+  });
+
+  final DemoHealthDefinition definition;
+  final DemoHealthRecord? record;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final isWorkout = definition.type == HealthTypeId.workout;
+    return Card(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              FilledButton.icon(
-                onPressed: _openScan,
-                icon: const Icon(Icons.search, size: 18),
-                label: Text(demoTr('扫描设备', 'Scan devices')),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      definition.title,
+                      style: const TextStyle(color: DemoColors.secondaryText),
+                    ),
+                  ),
+                  const Icon(
+                    Icons.chevron_right,
+                    size: 20,
+                    color: DemoColors.secondaryText,
+                  ),
+                ],
               ),
-              OutlinedButton.icon(
-                onPressed: saved == null ? null : _reconnect,
-                icon: const Icon(Icons.refresh, size: 18),
-                label: Text(demoTr('重连设备', 'Reconnect')),
+              const SizedBox(height: 8),
+              Text(
+                isWorkout
+                    ? demoTr('选择运动', 'Choose workout')
+                    : record?.valueText ?? demoTr('暂无数据', 'No data'),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
-              OutlinedButton.icon(
-                onPressed: _disconnect,
-                icon: const Icon(Icons.link_off, size: 18),
-                label: Text(demoTr('断开连接', 'Disconnect')),
+              const SizedBox(height: 5),
+              Text(
+                isWorkout
+                    ? demoTr('点击进入运动页面', 'Open workout page')
+                    : record == null
+                    ? demoTr('点击查看历史', 'View history')
+                    : _relativeTime(record!.measuredAtSec),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: DemoColors.secondaryText,
+                  fontSize: 12,
+                ),
               ),
             ],
           ),
-        ],
+        ),
       ),
     );
   }
 
-  Widget _tile(
-    String title,
-    String sub,
-    IconData icon,
-    VoidCallback onTap, {
-    bool? enabled,
-  }) {
-    final isEnabled = enabled ?? _ready;
-    return ListTile(
-      leading: Icon(icon),
-      title: Text(title),
-      subtitle: Text(sub),
-      trailing: const Icon(Icons.chevron_right),
-      enabled: isEnabled,
-      onTap: isEnabled ? onTap : null,
-    );
+  String _relativeTime(int timestampSec) {
+    if (timestampSec <= 0) return demoTr('点击查看历史', 'View history');
+    final value = DateTime.fromMillisecondsSinceEpoch(timestampSec * 1000);
+    final difference = DateTime.now().difference(value);
+    if (difference.inMinutes < 1) return demoTr('刚刚', 'Just now');
+    if (difference.inHours < 1) {
+      return demoTr(
+        '${difference.inMinutes} 分钟前',
+        '${difference.inMinutes} min ago',
+      );
+    }
+    if (difference.inDays < 1) {
+      return demoTr(
+        '${difference.inHours} 小时前',
+        '${difference.inHours} hr ago',
+      );
+    }
+    return '${value.month}/${value.day} ${value.hour.toString().padLeft(2, '0')}:${value.minute.toString().padLeft(2, '0')}';
   }
 }

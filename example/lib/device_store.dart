@@ -10,6 +10,8 @@ class DeviceStore {
   DeviceStore._();
 
   static const _key = 'rwfit_saved_device';
+  static const _capabilitiesKey = 'rwfit_saved_capabilities';
+  static const _lastSyncKey = 'rwfit_last_health_sync';
 
   /// 读取已保存设备；无则返回 null。
   static Future<BleDevice?> load() async {
@@ -29,9 +31,47 @@ class DeviceStore {
     await sp.setString(_key, jsonEncode(device.toMap()));
   }
 
-  /// 清除已保存设备（进扫描页时调用，防止旧设备误重连）。
+  static Future<Map<String, dynamic>> loadCapabilities() async {
+    final sp = await SharedPreferences.getInstance();
+    final raw = sp.getString(_capabilitiesKey);
+    if (raw == null || raw.isEmpty) return const {};
+    try {
+      return (jsonDecode(raw) as Map).cast<String, dynamic>();
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  static Future<void> saveCapabilities(
+    Map<String, dynamic> capabilities,
+  ) async {
+    final sp = await SharedPreferences.getInstance();
+    await sp.setString(_capabilitiesKey, jsonEncode(capabilities));
+  }
+
+  static Future<DateTime?> loadLastSyncAt() async {
+    final sp = await SharedPreferences.getInstance();
+    final milliseconds = sp.getInt(_lastSyncKey);
+    return milliseconds == null
+        ? null
+        : DateTime.fromMillisecondsSinceEpoch(milliseconds);
+  }
+
+  static Future<void> saveLastSyncAt(DateTime value) async {
+    final sp = await SharedPreferences.getInstance();
+    await sp.setInt(_lastSyncKey, value.millisecondsSinceEpoch);
+  }
+
+  static Future<void> clearLastSyncAt() async {
+    final sp = await SharedPreferences.getInstance();
+    await sp.remove(_lastSyncKey);
+  }
+
+  /// 用户明确解除绑定后清除设备和已缓存的功能表。
   static Future<void> clear() async {
     final sp = await SharedPreferences.getInstance();
     await sp.remove(_key);
+    await sp.remove(_capabilitiesKey);
+    await sp.remove(_lastSyncKey);
   }
 }
