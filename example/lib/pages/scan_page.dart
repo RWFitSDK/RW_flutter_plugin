@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:rwfit_ble/rwfit_ble.dart';
 
 import '../demo_theme.dart';
@@ -18,7 +17,6 @@ class _ScanPageState extends State<ScanPage> {
   final _ring = RwfitBle.instance;
   final _devices = <String, BleDevice>{};
   final _subscriptions = <StreamSubscription<dynamic>>[];
-  final _logs = <String>[];
   Timer? _countdown;
   Timer? _connectTimeout;
   bool _scanning = false;
@@ -41,12 +39,10 @@ class _ScanPageState extends State<ScanPage> {
         if (!mounted) return;
         _stopCountdown();
         setState(() => _scanning = false);
-        _log(demoTr('搜索已结束', 'Scan finished'));
       }),
     );
     _subscriptions.add(
       _ring.onConnectState.listen((event) {
-        _log('${demoTr('连接状态', 'Connection')}: ${event.state.name}');
         if (event.state == ConnectState.failed && mounted) {
           _connectTimeout?.cancel();
           _connectTimeout = null;
@@ -62,7 +58,6 @@ class _ScanPageState extends State<ScanPage> {
         if (_connecting == null) return;
         _connectTimeout?.cancel();
         _connectTimeout = null;
-        _log(demoTr('设备初始化完成', 'Device is ready'));
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -85,7 +80,6 @@ class _ScanPageState extends State<ScanPage> {
       _scanning = true;
       _remainingSeconds = 10;
     });
-    _log(demoTr('开始搜索附近设备', 'Scanning nearby devices'));
     _countdown?.cancel();
     _countdown = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) return;
@@ -105,7 +99,6 @@ class _ScanPageState extends State<ScanPage> {
           _error = '$error';
         });
       }
-      _log('${demoTr('搜索失败', 'Scan failed')}: $error');
     }
   }
 
@@ -123,7 +116,6 @@ class _ScanPageState extends State<ScanPage> {
     } catch (error) {
       if (!mounted) return;
       setState(() => _error = '$error');
-      _log('${demoTr('停止搜索失败', 'Failed to stop scan')}: $error');
     }
   }
 
@@ -139,9 +131,6 @@ class _ScanPageState extends State<ScanPage> {
       _connecting = device;
       _error = null;
     });
-    _log(
-      '${demoTr('正在连接', 'Connecting to')} ${device.name.isEmpty ? device.mac : device.name}',
-    );
     _connectTimeout?.cancel();
     _connectTimeout = Timer(const Duration(seconds: 20), () async {
       final connecting = _connecting;
@@ -157,7 +146,6 @@ class _ScanPageState extends State<ScanPage> {
         _connecting = null;
         _error = message;
       });
-      _log(message);
       try {
         await _ring.disconnect();
       } catch (_) {}
@@ -173,23 +161,6 @@ class _ScanPageState extends State<ScanPage> {
           _error = '$error';
         });
       }
-      _log('${demoTr('连接失败', 'Connection failed')}: $error');
-    }
-  }
-
-  void _log(String value) {
-    final now = TimeOfDay.now();
-    final line =
-        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')} $value';
-    if (mounted) setState(() => _logs.insert(0, line));
-  }
-
-  Future<void> _copyLogs() async {
-    await Clipboard.setData(ClipboardData(text: _logs.reversed.join('\n')));
-    if (mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(demoTr('日志已复制', 'Logs copied'))));
     }
   }
 
@@ -252,43 +223,6 @@ class _ScanPageState extends State<ScanPage> {
               ),
             ),
           ],
-          SectionHeading(
-            demoTr('连接日志', 'Connection log'),
-            trailing: TextButton(
-              onPressed: _logs.isEmpty ? null : _copyLogs,
-              child: Text(demoTr('复制', 'Copy')),
-            ),
-          ),
-          Container(
-            constraints: const BoxConstraints(minHeight: 100),
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: const Color(0xFF1F2925),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: _logs.isEmpty
-                ? Text(
-                    demoTr('暂无日志', 'No logs'),
-                    style: const TextStyle(color: Colors.white54),
-                  )
-                : Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      for (final line in _logs)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 5),
-                          child: Text(
-                            line,
-                            style: const TextStyle(
-                              color: Colors.white70,
-                              fontFamily: 'monospace',
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-          ),
         ],
       ),
     );
