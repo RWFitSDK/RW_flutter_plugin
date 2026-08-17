@@ -2,6 +2,19 @@
 
 ---
 
+## 目录
+
+- [1. 简介](#1-简介)
+- [2. 快速开始](#2-快速开始quick-start)
+- [3. 接口说明](#3-接口说明api-reference)
+  - [3.1 设备搜索、连接、绑定与重连](#31-设备搜索连接绑定与重连)
+  - [3.2 设备功能操作](#32-设备功能操作)
+- [4. 附录](#4-附录)
+- [Flutter 插件修订记录](#flutter-插件修订记录)
+- [联系方式与技术支持](#联系方式与技术支持)
+
+---
+
 ## 1. 简介
 
 ### 1.1 适用平台与语言
@@ -16,7 +29,6 @@
 - **设备**：RWFIT 智能戒指
 - **上传**：设备向 App 发送数据
 - **下发**：App 向设备发送数据
-- **就绪信号**：连接成功后由 `onFunctionMenu` 回调，业务指令须在其之后发起
 - **全量下发**：协议要求整批回传的写操作（如闹钟），改一条也要整批回发
 
 ### 1.3 注意事项
@@ -149,9 +161,9 @@ await RwfitBle.instance.init();
 > 所有方法返回 `Future`，调用失败抛 `RwfitException(code, message)`。普通读写指令等待设备响应；扫描、连接、查找设备、关机/恢复出厂、健康同步及 OTA 等启动型方法仅表示任务已发起，最终状态通过对应事件确认。
 > 事件流通过 typed `Stream` 暴露，需在页面 `dispose` 时 `cancel()`。
 
-### 3.1 设备搜索与连接, 绑定与重连
+### 3.1 设备搜索、连接、绑定与重连
 
-##### 3.1.1 搜索蓝牙
+#### 3.1.1 搜索蓝牙
 
 | 方法 / Stream | 参数 | 返回 | 说明 |
 |--------------|------|------|------|
@@ -173,20 +185,20 @@ ring.onScanResult.listen((d) => print('${d.name} ${d.mac}'));
 await ring.startScan();
 ```
 
-##### 3.1.2 停止搜索
+#### 3.1.2 停止搜索
 
 | 方法 | 参数 | 返回 | 说明 |
 |------|------|------|------|
 | `stopScan()` | 无 | `Future<void>` | 停止扫描 |
 
-##### 3.1.3 连接设备与状态监听
+#### 3.1.3 连接设备与状态监听
 
 | 方法 / Stream | 参数 | 返回 | 说明 |
 |--------------|------|------|------|
 | `connect(BleDevice device)` | 扫描得到的完整 `BleDevice` | `Future<void>` | 发起连接 |
 | `isConnected()` | 无 | `Future<bool>` | 当前是否已连接 |
 | `onConnectState` | — | `Stream<ConnectStateEvent>` | 连接状态变化 |
-| `onFunctionMenu` | — | `Stream<FunctionMenu>` | **设备就绪信号**，收到后才可发业务指令 |
+| `onFunctionMenu` | — | `Stream<FunctionMenu>` | 设备功能表与就绪事件 |
 
 **`ConnectStateEvent` 字段：**
 
@@ -196,18 +208,18 @@ await ring.startScan();
 | `name` | `String?` | 设备名 |
 | `mac` | `String?` | MAC |
 | `uuid` | `String?` | 仅 iOS |
-| `reason` | `String?` | 仅 `failed` 时有；Android 为原生 `RingBleError` 枚举名，iOS 原生回调不提供错误参数，固定为 `"unknown"` |
+| `reason` | `String?` | 仅 `failed` 时有；Android 返回错误名称，iOS 返回 `"unknown"` |
 
 > [!TIP]
 > 连接后，业务操作应在 `onFunctionMenu`（设备就绪）之后才进行；`connected` 早于就绪。
 
-##### 3.1.4 断开连接设备
+#### 3.1.4 断开连接设备
 
 | 方法 | 参数 | 返回 | 说明 |
 |------|------|------|------|
 | `disconnect()` | 无 | `Future<void>` | 断开连接 |
 
-##### 3.1.5 本地绑定与自动重连,解绑
+#### 3.1.5 本地绑定、自动重连与解绑
 
 > [!IMPORTANT]
 > 与原生 SDK 一致，本地绑定/持久化需 App 自行实现（参考 `example/lib/device_store.dart`）。连接就绪时保存设备 `{name, mac, uuid}`，下次启动读取后重连。iOS 重连前需先 `iosSetBindedStatus(true)`。推荐做法见「4.3 重连与设备持久化」。
@@ -218,10 +230,10 @@ await ring.startScan();
 | `iosSetBindedStatus(bool isBinded)` | `isBinded`：绑定状态 | `Future<void>` | **iOS 专用**，Android no-op |
 | `unbind()` | 无 | `Future<void>` | 解绑设备（Android 下发解绑指令；iOS 清除绑定态+断开） |
 
-##### 3.1.6 设备功能配置表
+#### 3.1.6 设备功能配置表
 
 > [!IMPORTANT]
-> 因设备型号多、支持功能不同，连接就绪后通过 `onFunctionMenu` 获取能力表 `FunctionMenu`，App 据此做按钮灰显/隐藏，插件不替你判断。
+> 不同设备型号支持的功能可能不同。通过 `onFunctionMenu` 获取能力表 `FunctionMenu`，App 据此做按钮灰显或隐藏。
 
 **`FunctionMenu` 字段：**
 
@@ -235,7 +247,7 @@ await ring.startScan();
 
 **功能属性：**
 
-`onFunctionMenu.raw` 与 `getFunctionList()['supportMenu']` 返回相同的统一功能属性：
+`onFunctionMenu.raw` 与 `getFunctionList()['supportMenu']` 返回相同的功能属性：
 
 | 属性 | 类型 | 说明 |
 |---|---|---|
@@ -290,11 +302,11 @@ await ring.startScan();
 
 | 方式 | 返回 | 说明 |
 |---|---|---|
-| `onFunctionMenu` | `Stream<FunctionMenu>` | 连接就绪后推送设备功能表 |
+| `onFunctionMenu` | `Stream<FunctionMenu>` | 推送设备功能表 |
 | `getFunctionList()` | `Future<Map<String, dynamic>>` | 主动获取当前功能表，属性位于返回值的 `supportMenu` 中 |
 
 > [!NOTE]
-> 建议优先使用连接就绪后推送的 `onFunctionMenu`。尚未获取到设备功能表时，`getFunctionList()` 的 `supportMenu` 可能为空。
+> 建议优先订阅 `onFunctionMenu`。尚未收到设备功能表时，`getFunctionList()` 的 `supportMenu` 可能为空。
 
 ### 3.2 设备功能操作
 
@@ -356,7 +368,7 @@ await ring.startScan();
 |------|------|------|------|
 | `getVideoHid()` | 无 | `Future<int>` hidOpen 值 | 获取 HID 模式 |
 | `setVideoHid(int hidOpen)` | `hidOpen`：0=关闭, 1=视频, 2=Book, 3=Music | `Future<void>` | 设置 HID 模式 |
-| `createOrRemoveBond(int type, String mac)` | `type`：1=配对, 2=取消；`mac`：设备 MAC | `Future<bool>` 是否成功发起操作 | **Android 专用**，用于视频 HID 系统配对；iOS no-op 返回 `false` |
+| `createOrRemoveBond(int type, String mac)` | `type`：1=配对，2=取消<br>`mac`：设备 MAC | `Future<bool>` 是否成功发起操作 | **Android 专用**，用于视频 HID 系统配对；iOS no-op 返回 `false` |
 
 ##### 3.2.1.6 获取与设置LED亮屏强度
 
@@ -385,7 +397,7 @@ await ring.startScan();
 |------|------|------|------|
 | `controlPhoto(int state)` | `state`：1=进入拍照模式, 0=退出 | `Future<void>` | 拍照控制 |
 
-进入拍照模式后，设备主动上报值 `2` 表示请求 App 拍照。插件已将其统一转换为 `onTouchEvent` 事件：
+进入拍照模式后，通过 `onTouchEvent` 监听设备的拍照请求：
 
 ```dart
 final photoSub = rwfit.onTouchEvent.listen((event) {
@@ -395,7 +407,7 @@ final photoSub = rwfit.onTouchEvent.listen((event) {
 });
 ```
 
-页面销毁时调用 `photoSub.cancel()`。原始值 `2` 由桥接层处理，App 无需解析。
+页面销毁时调用 `photoSub.cancel()`。
 
 ##### 3.2.1.9 查找设备
 
@@ -455,7 +467,7 @@ final photoSub = rwfit.onTouchEvent.listen((event) {
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `count` | `int` | 振动次数：0–6，默认 2；0 表示不振动 |
+| `count` | `int` | 振动次数：0–6；0 表示不振动 |
 | `level` | `int` | 振动强度：0=关闭，1=低，2=中，3=高 |
 
 ##### 3.2.1.13 屏幕睡眠模式设置与获取
@@ -564,15 +576,15 @@ iOS 音乐控制由系统处理。
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `isOpen` | `bool` | 是否开启 |
-| `highThreshold` | `int` | 心率高于该值时报警，设备默认通常为 160 bpm |
-| `lowThreshold` | `int?` | 心率低于该值时报警；null 表示设备不支持低心率报警 |
+| `highThreshold` | `int` | 心率高于该值时报警，范围 0–254 bpm |
+| `lowThreshold` | `int?` | 心率低于该值时报警，范围 0–254 bpm；null 表示设备不支持低心率报警 |
 
 **`BloodOxygenAlertConfig` 字段：**
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `isOpen` | `bool` | 是否开启 |
-| `lowThreshold` | `int` | 血氧低于该值时报警，协议默认值为 94% |
+| `lowThreshold` | `int` | 血氧低于该值时报警，范围 0–254 |
 
 **`HealthAlertEvent` 字段：**
 
@@ -604,12 +616,12 @@ iOS 音乐控制由系统处理。
 |------|------|------|------|
 | `setTimeFormat(int format)` | `format`：0=24小时制, 1=12小时制 | `Future<void>` | 仅对带时间显示的设备有效 |
 
-##### 3.2.1.20 闹钟震动时长设置与获取
+##### 3.2.1.20 闹钟振动次数设置与获取
 
 | 方法 | 参数 | 返回 | 说明 |
 |------|------|------|------|
 | `getAlarmVibrationDuration()` | 无 | `Future<int>` 振动次数 0–6 | 获取闹钟振动次数 |
-| `setAlarmVibrationDuration(int duration)` | `duration`：协议实际表示振动次数，0–6 | `Future<void>` | 默认 2 次；0 表示不振动 |
+| `setAlarmVibrationDuration(int duration)` | `duration`：振动次数，0–6 | `Future<void>` | 0 表示不振动 |
 
 
 
@@ -639,18 +651,18 @@ iOS 音乐控制由系统处理。
 | `getVibrationInterval()` | 无 | `Future<int>` | 获取每次震动之间的间隔，单位 ms |
 | `setVibrationInterval(int intervalMs)` | `intervalMs`：100–1000 | `Future<void>` | 设置震动间隔；设备默认通常为 500 ms |
 
-##### 3.2.1.23 心率校正(工厂测试)
+##### 3.2.1.23 心率校正
 
 | 方法 / Stream | 参数 | 返回 | 说明 |
 |--------------|------|------|------|
-| `startHeartRateCalibration()` | 无 | `Future<void>` | 启动心率校正，测试模式由桥接固定为 `0x15` |
+| `startHeartRateCalibration()` | 无 | `Future<void>` | 启动心率校正 |
 | `onHeartRateCalibration` | — | `Stream<HeartRateCalibrationResult>` | 校正过程及最终结果 |
 
 **`HeartRateCalibrationResult` 字段：**
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `testMode` | `int` | 测试模式；心率校正为 `0x15` |
+| `testMode` | `int` | 校正类型标识 |
 | `result` | `int` | 0=校正中，非 0=校正完成结果 |
 | `isCalibrating` | `bool` | `result == 0` |
 | `isCompleted` | `bool` | `result != 0` |
@@ -707,8 +719,7 @@ await ring.startRealtimeMeasure(RealtimeMetric.hr);
 | `RealtimeMetric.bloodPressure` | 血压 |
 | `RealtimeMetric.temperature` | 体温 |
 
-体温实时上报的协议原始值为实际温度的 10 倍；Android/iOS 桥接已统一换算，
-`RealtimeData.value` 直接返回摄氏度实际值，例如 `36.5`。
+体温测量的 `RealtimeData.value` 直接返回摄氏度，例如 `36.5`。
 
 **`RealtimeData` 字段：**
 
@@ -717,7 +728,7 @@ await ring.startRealtimeMeasure(RealtimeMetric.hr);
 | `type` | `HealthType?` | 数据类型枚举 |
 | `value` | `double` | 测量主值；血糖保留小数，体温为摄氏度实际值，其他整数测量值以 `.0` 表示 |
 | `diastolic` | `int?` | 舒张压（仅血压测量时有值） |
-| `timestampSec` | `int` | 测量时间戳，Unix 秒（Android/iOS 已由桥接层统一） |
+| `timestampSec` | `int` | 测量时间戳，Unix 秒 |
 | `timestampMs` | `int` | **已废弃兼容 getter**，等于 `timestampSec * 1000`；新代码不要使用 |
 
 **`HealthType` 枚举：**
@@ -738,7 +749,7 @@ await ring.startRealtimeMeasure(RealtimeMetric.hr);
 7 项全天健康检测与 PPG 定时监测共用 `TimedConfig`：get 返回 `Future<TimedConfig>`，set 接收 `TimedConfig` 返回 `Future<void>`。本节详列 7 项全天健康检测，PPG 见 §3.2.5.0。
 
 > [!IMPORTANT]
-> 心率和体温间隔可设为 30 或 60 分钟；血氧、HRV、压力、血糖和血压固定为 60 分钟。PPG 默认间隔为 30 分钟，应优先读取设备当前配置后修改开关。所有检测的开始与结束时间固定为 `00:00–23:59`；桥接层会将输入和输出统一夹紧到该全天时段。
+> 心率和体温间隔可设为 30 或 60 分钟；血氧、HRV、压力、血糖和血压固定为 60 分钟。PPG 默认间隔为 30 分钟，应优先读取设备当前配置后修改开关。所有检测的开始与结束时间固定为 `00:00–23:59`，不支持自定义时段。
 
 **`TimedConfig` 字段：**
 
@@ -751,7 +762,7 @@ await ring.startRealtimeMeasure(RealtimeMetric.hr);
 | `endHour` | `int` | 固定为 23 |
 | `endMin` | `int` | 固定为 59 |
 
-支持 `copyWith(...)` 便于修改开关或间隔后回发；自定义时间字段会被桥接层忽略并统一为全天。
+支持 `copyWith(...)` 便于修改开关或间隔后回发；开始和结束时间字段应保持上述全天固定值。
 
 ###### 3.2.2.2.1 心率检测设置与获取
 
@@ -786,7 +797,7 @@ await ring.startRealtimeMeasure(RealtimeMetric.hr);
 | 方法 / Stream | 参数 | 返回 | 说明 |
 |--------------|------|------|------|
 | `syncAllHealthData()` | 无 | `Future<void>` | 发起全量健康数据同步 |
-| `removeHealthDataCallback()` | 无 | `Future<void>` | 停止向 Flutter 转发后续同步事件 |
+| `removeHealthDataCallback()` | 无 | `Future<void>` | 停止健康同步事件的继续回调 |
 | `onSyncProgress` | — | `Stream<double>`，值为 100 | 同步完成标记；紧接着触发 `onSyncFinish` |
 | `onSyncResult` | — | `Stream<SyncResult>` | 同步到的数据 |
 | `onSyncFinish` | — | `Stream<void>` | 同步完成 |
@@ -878,18 +889,86 @@ await ring.startRealtimeMeasure(RealtimeMetric.hr);
 
 #### 3.2.3 OTA升级
 
+##### 3.2.3.1 获取可用固件
+
+可用固件列表可通过以下接口获取：
+
+```http
+GET https://ruiwo168.com/api/device/getOtaListByModel?model=<deviceClazz>
+```
+
+查询参数 `model` 对应 `getFirmwareVersion()` 返回的 `deviceClazz`。请求前应先读取设备固件信息，并使用实际的 `deviceClazz` 作为 `model`：
+
+```dart
+import 'dart:convert';
+import 'dart:io';
+
+final firmware = await ring.getFirmwareVersion();
+final uri = Uri.https(
+  'ruiwo168.com',
+  '/api/device/getOtaListByModel',
+  {'model': firmware.deviceClazz},
+);
+
+final client = HttpClient();
+try {
+  final request = await client.getUrl(uri);
+  final response = await request.close();
+  final body = await response.transform(utf8.decoder).join();
+  final result = jsonDecode(body) as Map<String, dynamic>;
+} finally {
+  client.close();
+}
+```
+
+接口返回示例：
+
+```json
+{
+  "code": 0,
+  "msg": "操作成功",
+  "data": [
+    {
+      "deviceModel": "DEVICE_MODEL",
+      "toVersion": "X.Y.Z",
+      "size": 123456,
+      "downloadUrl": "https://example.com/path/firmware.bin"
+    }
+  ]
+}
+```
+
+OTA 流程只需关注 `data` 中的以下字段，其他字段可以忽略：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `deviceModel` | `String` | 固件适用的设备型号，应与 `getFirmwareVersion()` 返回的 `deviceClazz` 完全一致 |
+| `toVersion` | `String` | `downloadUrl` 指向的固件版本号；仅当该版本高于设备当前版本时才应升级 |
+| `size` | `int` | 固件文件大小，单位为字节（Byte） |
+| `downloadUrl` | `String` | 固件文件下载地址 |
+
+设备当前固件版本为 `getFirmwareVersion()` 返回的 `deviceNo`，目标版本为接口返回的 `toVersion`。发起升级前必须比较两个版本号，仅当 `toVersion` 高于 `deviceNo` 时才下载并升级；版本相同或 `toVersion` 更低时不应升级。对于 `X.Y.Z` 格式，应按各段数值依次比较，不能直接按字符串比较（例如 `2.10.0` 高于 `2.9.0`）。如果版本号不符合约定格式或无法比较，应停止升级并确认版本信息。
+
+如果客户使用自己的服务器管理固件升级，可先通过 `downloadUrl` 下载对应的 `.bin` 固件包，再将固件包保存到自己的服务器，并自行维护 `deviceModel`、`toVersion` 与固件包之间的对应关系。其中，`toVersion` 即该固件包的版本号。
+
+从 `downloadUrl` 下载固件到 App 本地后，将本地文件路径传给 `ringOta(path)`。发起升级前须再次确认 `deviceModel` 与设备的 `deviceClazz` 完全一致。
+
+##### 3.2.3.2 发起并监听 OTA
+
 > [!CAUTION]
-> OTA 固件必须由设备厂家提供。升级前先调用 `getFirmwareVersion()`，并确认返回的 `deviceClazz` 与厂家声明的固件适用型号均非空且完全一致；型号不一致时禁止升级，否则可能导致设备无法使用。
+> OTA 固件必须使用上述接口提供的版本。升级前先调用 `getFirmwareVersion()`，并确认返回的 `deviceClazz` 与接口返回的 `deviceModel` 均非空且完全一致，同时确认 `toVersion` 高于设备当前的 `deviceNo`；型号不一致、目标版本不高于当前版本或版本号无法比较时禁止升级，否则可能导致设备无法使用。
+
+版本判断由 App 在选择固件时完成；以下示例仅展示型号校验和 OTA 发起。
 
 ```dart
 final firmware = await ring.getFirmwareVersion();
-const otaDeviceClazz = '由设备厂家提供的适用型号';
-const otaPath = '/固件文件的本地路径';
+const otaDeviceModel = '<接口返回的 deviceModel>';
+const otaPath = '<下载后的 .bin 固件本地路径>';
 if (firmware.deviceClazz.isEmpty ||
-    otaDeviceClazz.isEmpty ||
-    firmware.deviceClazz != otaDeviceClazz) {
+    otaDeviceModel.isEmpty ||
+    firmware.deviceClazz != otaDeviceModel) {
   throw StateError(
-    'OTA 型号不匹配: device=${firmware.deviceClazz}, firmware=$otaDeviceClazz',
+    'OTA 型号不匹配: device=${firmware.deviceClazz}, firmware=$otaDeviceModel',
   );
 }
 await ring.ringOta(otaPath);
@@ -901,9 +980,7 @@ await ring.ringOta(otaPath);
 | `onOtaProgress` | — | `Stream<double>` 0.0–1.0 | OTA 进度 |
 | `onOtaFinish` | — | `Stream<OtaResult>` | OTA 完成 |
 
-Android 桥接会将 OTA 进度统一限制为 `0.0–1.0`。当前 Android SDK
-已验证的回调尺度是 `0.0–1.0`；兼容 `0–100` 的换算分支仅为防御性保护，
-未在当前 SDK 版本发现实际触发场景。
+OTA 进度范围为 `0.0–1.0`。
 
 **`OtaResult` 字段：**
 
@@ -960,7 +1037,7 @@ Android 桥接会将 OTA 进度统一限制为 `0.0–1.0`。当前 Android SDK
 | `duration` | `int` | 运动时长（秒） |
 | `steps` | `int` | 步数 |
 | `distance` | `int` | 距离（米） |
-| `calorie` | `int` | 热量（Cal）；Android 桥接已按 iOS 语义统一 |
+| `calorie` | `int` | 热量（Cal） |
 | `heartRate` | `int` | 实时心率 |
 | `dataType` | `WorkoutDataType` | 对外固定为 `appWorkoutData` |
 | `rawDataType` | `int` | 对外固定为 `0x0223` |
@@ -987,7 +1064,7 @@ Android 桥接会将 OTA 进度统一限制为 `0.0–1.0`。当前 Android SDK
 | `date` | `String` | 日期，格式 `yyyyMMdd` |
 | `sportType` | `int` | 运动类型 |
 | `duration` | `int` | 运动时长（秒） |
-| `step` / `distance` / `calorie` | `int` | 步数 / 距离（米）/ 热量（Cal）；Android 已按 iOS 语义统一 |
+| `step` / `distance` / `calorie` | `int` | 步数 / 距离（米）/ 热量（Cal） |
 | `height` / `pressure` | `int` | 高度 / 气压 |
 | `cadence` / `speed` / `pace` | `int` / `double` / `int` | 步频 / 速度（m/h）/ 配速 |
 | `averageHeartRate` | `int` | 平均心率 |
@@ -1056,7 +1133,7 @@ final reports = await ring.getWorkoutReports();
 |--------------|------|------|------|
 | `controlSensorRaw(bool enabled, SensorRawSelection selection)` | `enabled`：开启/关闭；`selection`：合法采集组合 | `Future<void>` | 控制原始数据采集 |
 | `onSensorRawData` | — | `Stream<SensorRawPacket>` | 设备主动推送的原始数据包 |
-| `onSensorRawStopped` | — | `Stream<SensorRawStoppedEvent>` | 设备主动停止采集；`reason` 为停止原因，0 表示原生未提供原因 |
+| `onSensorRawStopped` | — | `Stream<SensorRawStoppedEvent>` | 设备主动停止采集；`reason` 为停止原因，0 表示未提供原因 |
 
 离开采集页面时应使用相同的 `selection` 调用 `controlSensorRaw(false, selection)`。
 
@@ -1113,7 +1190,7 @@ try {
 }
 ```
 
-`code == 0` 为成功（内部消费，不会抛出）；`code != 0` 均抛异常。
+调用成功时正常返回；调用失败时抛出 `RwfitException`。
 
 ### 4.2 关键约束
 
@@ -1125,7 +1202,7 @@ try {
 | **能力门控在 App 侧** | 读 `FunctionMenu.raw` 做按钮灰显/隐藏，插件不替你判断 |
 | **Android 12+ 权限** | `BLUETOOTH_SCAN`/`BLUETOOTH_CONNECT` 运行时动态申请 |
 | **iOS 设备标识** | 优先用 `uuid` 关联（非 MAC），重连需先 `iosSetBindedStatus(true)` |
-| **EventSink 释放** | 页面 `dispose` 时取消所有 Stream 订阅，避免事件叠加 |
+| **Stream 订阅清理** | 页面 `dispose` 时取消所有 Stream 订阅，避免事件叠加 |
 | **平台独占方法** | 不适用平台通常 no-op；返回未报错不代表功能已执行，业务层应按平台区分 |
 
 ### 4.3 重连与设备持久化
@@ -1220,7 +1297,7 @@ Future<void> connectAndRead() async {
 
 **v0.0.3_20260731** (2026.07.31)
 
-- 完善 Android/iOS 双端桥接，统一能力字段、事件及错误语义
+- 统一 Android/iOS 的能力字段、事件及错误语义
 - 补充定时监测、健康提醒、设备控制和传感器原始数据等功能
 - 新增实时单次测量完成通知，优化健康同步与连接状态处理
 - Demo 增加设备能力门控并完善相关功能页面
@@ -1234,6 +1311,6 @@ Future<void> connectAndRead() async {
 
 ---
 
-## 联系方式 / 技术支持
+## 联系方式与技术支持
 
 developer@dhouse88.com

@@ -2,6 +2,19 @@
 
 ---
 
+## Contents
+
+- [1. Introduction](#1-introduction)
+- [2. Quick Start](#2-quick-start)
+- [3. API Reference](#3-api-reference)
+  - [3.1 Device Scanning, Connection, Binding, and Reconnection](#31-device-scanning-connection-binding-and-reconnection)
+  - [3.2 Device Operations](#32-device-operations)
+- [4. Appendix](#4-appendix)
+- [Flutter Plugin Revision History](#flutter-plugin-revision-history)
+- [Contact and Technical Support](#contact-and-technical-support)
+
+---
+
 ## 1. Introduction
 
 ### 1.1 Supported Platforms and Languages
@@ -16,7 +29,6 @@
 - **Device**: an RWFIT smart ring
 - **Upload**: data sent from the device to the app
 - **Command**: data or an operation sent from the app to the device
-- **Ready signal**: the `onFunctionMenu` callback emitted after connection; business commands must wait for it
 - **Full replacement**: a write operation for which the protocol requires the complete collection to be sent back, such as alarms
 
 ### 1.3 Notes
@@ -153,7 +165,7 @@ await RwfitBle.instance.init();
 
 ### 3.1 Device Scanning, Connection, Binding, and Reconnection
 
-##### 3.1.1 Scan for Bluetooth Devices
+#### 3.1.1 Scan for Bluetooth Devices
 
 | Method / Stream | Parameters | Returns | Description |
 |-----------------|------------|---------|-------------|
@@ -175,20 +187,20 @@ ring.onScanResult.listen((d) => print('${d.name} ${d.mac}'));
 await ring.startScan();
 ```
 
-##### 3.1.2 Stop Scanning
+#### 3.1.2 Stop Scanning
 
 | Method | Parameters | Returns | Description |
 |--------|------------|---------|-------------|
 | `stopScan()` | None | `Future<void>` | Stop scanning |
 
-##### 3.1.3 Connect and Listen for State Changes
+#### 3.1.3 Connect and Listen for State Changes
 
 | Method / Stream | Parameters | Returns | Description |
 |-----------------|------------|---------|-------------|
 | `connect(BleDevice device)` | Complete `BleDevice` returned by scanning | `Future<void>` | Initiate a connection |
 | `isConnected()` | None | `Future<bool>` | Whether the device is currently connected |
 | `onConnectState` | — | `Stream<ConnectStateEvent>` | Connection-state changes |
-| `onFunctionMenu` | — | `Stream<FunctionMenu>` | **Device ready signal**; business commands must wait for it |
+| `onFunctionMenu` | — | `Stream<FunctionMenu>` | Capability-table and ready event |
 
 **`ConnectStateEvent` fields:**
 
@@ -198,18 +210,18 @@ await ring.startScan();
 | `name` | `String?` | Device name |
 | `mac` | `String?` | MAC address |
 | `uuid` | `String?` | iOS only |
-| `reason` | `String?` | Present only for `failed`; Android uses the native `RingBleError` enum name, while iOS always returns `"unknown"` because its native callback has no error parameter |
+| `reason` | `String?` | Present only for `failed`; Android returns an error name and iOS returns `"unknown"` |
 
 > [!TIP]
 > `connected` is emitted before the device is ready. Send business commands only after `onFunctionMenu`.
 
-##### 3.1.4 Disconnect
+#### 3.1.4 Disconnect
 
 | Method | Parameters | Returns | Description |
 |--------|------------|---------|-------------|
 | `disconnect()` | None | `Future<void>` | Disconnect the device |
 
-##### 3.1.5 Local Binding, Automatic Reconnection, and Unbinding
+#### 3.1.5 Local Binding, Automatic Reconnection, and Unbinding
 
 > [!IMPORTANT]
 > As with the native SDKs, the app is responsible for local binding and persistence; see `example/lib/device_store.dart`. Save `{name, mac, uuid}` when the connection becomes ready and load it for reconnection on the next launch. On iOS, call `iosSetBindedStatus(true)` before reconnecting. See section 4.3 for the recommended flow.
@@ -220,10 +232,10 @@ await ring.startScan();
 | `iosSetBindedStatus(bool isBinded)` | `isBinded`: binding state | `Future<void>` | **iOS only**; Android no-op |
 | `unbind()` | None | `Future<void>` | Unbind; Android sends the unbind command, while iOS clears binding state and disconnects |
 
-##### 3.1.6 Device Capability Table
+#### 3.1.6 Device Capability Table
 
 > [!IMPORTANT]
-> Device models support different features. After the connection becomes ready, read `FunctionMenu` from `onFunctionMenu` and use it to disable or hide unsupported controls. The plugin does not gate business UI for the app.
+> Device models support different features. Read `FunctionMenu` from `onFunctionMenu` and use it to disable or hide unsupported controls.
 
 **`FunctionMenu` fields:**
 
@@ -237,7 +249,7 @@ await ring.startScan();
 
 **Capability properties:**
 
-`onFunctionMenu.raw` and `getFunctionList()['supportMenu']` return the same normalized properties:
+`onFunctionMenu.raw` and `getFunctionList()['supportMenu']` return the same capability properties:
 
 | Property | Type | Description |
 |----------|------|-------------|
@@ -292,11 +304,11 @@ await ring.startScan();
 
 | Source | Returns | Description |
 |--------|---------|-------------|
-| `onFunctionMenu` | `Stream<FunctionMenu>` | Pushes the capability table when the connection becomes ready |
+| `onFunctionMenu` | `Stream<FunctionMenu>` | Emits the capability table |
 | `getFunctionList()` | `Future<Map<String, dynamic>>` | Actively gets the current table under `supportMenu` |
 
 > [!NOTE]
-> Prefer `onFunctionMenu` after connection. Before the table has been received, `getFunctionList()['supportMenu']` may be empty.
+> Prefer subscribing to `onFunctionMenu`. Before the table has been received, `getFunctionList()['supportMenu']` may be empty.
 
 ### 3.2 Device Operations
 
@@ -356,7 +368,7 @@ await ring.startScan();
 |--------|------------|---------|-------------|
 | `getVideoHid()` | None | `Future<int>` | Get the `hidOpen` mode |
 | `setVideoHid(int hidOpen)` | 0=off, 1=video, 2=Book, 3=Music | `Future<void>` | Set HID mode |
-| `createOrRemoveBond(int type, String mac)` | `type`: 1=pair, 2=unpair; device MAC | `Future<bool>` indicating whether the operation was initiated | **Android only**, for system HID pairing; iOS no-op returns `false` |
+| `createOrRemoveBond(int type, String mac)` | `type`: 1=pair, 2=unpair<br>`mac`: device MAC | `Future<bool>` indicating whether the operation was initiated | **Android only**, for system HID pairing; iOS no-op returns `false` |
 
 ##### 3.2.1.6 Get and Set LED Brightness
 
@@ -385,7 +397,7 @@ await ring.startScan();
 |--------|------------|---------|-------------|
 | `controlPhoto(int state)` | 1=enter camera mode, 0=exit | `Future<void>` | Control camera mode |
 
-After camera mode is enabled, a device-originated value of `2` requests the app to take a picture. The bridge normalizes it to `onTouchEvent`:
+After camera mode is enabled, listen for camera requests through `onTouchEvent`:
 
 ```dart
 final photoSub = rwfit.onTouchEvent.listen((event) {
@@ -395,7 +407,7 @@ final photoSub = rwfit.onTouchEvent.listen((event) {
 });
 ```
 
-Call `photoSub.cancel()` when the page is disposed. The app does not need to parse the raw value.
+Call `photoSub.cancel()` when the page is disposed.
 
 ##### 3.2.1.9 Find Device
 
@@ -455,7 +467,7 @@ Use `copyWith(...)` to change selected fields while preserving the others.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `count` | `int` | 0–6; default 2, and 0 means no vibration |
+| `count` | `int` | Vibration count, 0–6; 0 means no vibration |
 | `level` | `int` | 0=off, 1=low, 2=medium, 3=high |
 
 ##### 3.2.1.13 Get and Set Screen Sleep Mode
@@ -563,15 +575,15 @@ Use this API only when `isRememberSwitch == true`. It enables or disables the Mu
 | Field | Type | Description |
 |-------|------|-------------|
 | `isOpen` | `bool` | Whether enabled |
-| `highThreshold` | `int` | Alert above this value; device default is typically 160 bpm |
-| `lowThreshold` | `int?` | Alert below this value; null means the device does not support low-heart-rate alerts |
+| `highThreshold` | `int` | Alert above this value; range 0–254 bpm |
+| `lowThreshold` | `int?` | Alert below this value; range 0–254 bpm, or null when low-heart-rate alerts are unsupported |
 
 **`BloodOxygenAlertConfig` fields:**
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `isOpen` | `bool` | Whether enabled |
-| `lowThreshold` | `int` | Alert below this value; protocol default is 94% |
+| `lowThreshold` | `int` | Alert below this value; range 0–254 |
 
 **`HealthAlertEvent` fields:**
 
@@ -603,12 +615,12 @@ Use this API only when `isRememberSwitch == true`. It enables or disables the Mu
 |--------|------------|---------|-------------|
 | `setTimeFormat(int format)` | `format`: 0=24-hour, 1=12-hour | `Future<void>` | Only effective on devices with a time display |
 
-##### 3.2.1.20 Get and Set Alarm Vibration Duration
+##### 3.2.1.20 Get and Set Alarm Vibration Count
 
 | Method | Parameters | Returns | Description |
 |--------|------------|---------|-------------|
 | `getAlarmVibrationDuration()` | None | `Future<int>` | Vibration count, 0–6 |
-| `setAlarmVibrationDuration(int duration)` | Protocol value is actually a vibration count, 0–6 | `Future<void>` | Default 2; 0 means no vibration |
+| `setAlarmVibrationDuration(int duration)` | `duration`: vibration count, 0–6 | `Future<void>` | 0 means no vibration |
 
 ##### 3.2.1.21 Touch Event Notifications
 
@@ -636,18 +648,18 @@ Use this API only when `isRememberSwitch == true`. It enables or disables the Mu
 | `getVibrationInterval()` | None | `Future<int>` | Interval between vibrations in ms |
 | `setVibrationInterval(int intervalMs)` | `intervalMs`: 100–1000 | `Future<void>` | Set the interval; device default is typically 500 ms |
 
-##### 3.2.1.23 Heart-Rate Calibration (Factory Test)
+##### 3.2.1.23 Heart-Rate Calibration
 
 | Method / Stream | Parameters | Returns | Description |
 |-----------------|------------|---------|-------------|
-| `startHeartRateCalibration()` | None | `Future<void>` | Start calibration; the bridge fixes test mode to `0x15` |
+| `startHeartRateCalibration()` | None | `Future<void>` | Start heart-rate calibration |
 | `onHeartRateCalibration` | — | `Stream<HeartRateCalibrationResult>` | Calibration progress and result |
 
 **`HeartRateCalibrationResult` fields:**
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `testMode` | `int` | Heart-rate calibration uses `0x15` |
+| `testMode` | `int` | Calibration type identifier |
 | `result` | `int` | 0=calibrating; non-zero=completed result |
 | `isCalibrating` | `bool` | `result == 0` |
 | `isCompleted` | `bool` | `result != 0` |
@@ -703,9 +715,8 @@ await ring.startRealtimeMeasure(RealtimeMetric.hr);
 | `RealtimeMetric.bloodPressure` | Blood pressure |
 | `RealtimeMetric.temperature` | Body temperature |
 
-The protocol reports real-time body temperature at 10 times the actual value.
-The Android and iOS bridges normalize it, so `RealtimeData.value` directly returns
-the temperature in degrees Celsius, for example `36.5`.
+For body-temperature measurements, `RealtimeData.value` directly returns degrees
+Celsius, for example `36.5`.
 
 **`RealtimeData` fields:**
 
@@ -714,7 +725,7 @@ the temperature in degrees Celsius, for example `36.5`.
 | `type` | `HealthType?` | Data type |
 | `value` | `double` | Primary value; blood sugar retains decimal precision, body temperature is the actual Celsius value, and other integer-valued measurements use `.0` |
 | `diastolic` | `int?` | Diastolic pressure, only for blood-pressure measurements |
-| `timestampSec` | `int` | Unix timestamp in seconds, normalized across Android and iOS |
+| `timestampSec` | `int` | Unix timestamp in seconds |
 | `timestampMs` | `int` | **Deprecated compatibility getter**, equal to `timestampSec * 1000`; do not use in new code |
 
 **`HealthType` enum:**
@@ -735,7 +746,7 @@ the temperature in degrees Celsius, for example `36.5`.
 Seven all-day health-monitoring types and timed PPG monitoring share `TimedConfig`. Getters return `Future<TimedConfig>` and setters accept `TimedConfig` and return `Future<void>`. This section lists the seven health types; timed PPG is covered in 3.2.5.0.
 
 > [!IMPORTANT]
-> Heart-rate and body-temperature intervals support 30 or 60 minutes. Blood oxygen, HRV, stress, blood sugar, and blood pressure use 60 minutes. Timed PPG defaults to 30 minutes; read the current device configuration before changing its switch. All monitoring windows are fixed to `00:00–23:59`, and the bridge clamps input and output to that full-day range.
+> Heart-rate and body-temperature intervals support 30 or 60 minutes. Blood oxygen, HRV, stress, blood sugar, and blood pressure use 60 minutes. Timed PPG defaults to 30 minutes; read the current device configuration before changing its switch. All monitoring windows are fixed to `00:00–23:59`; custom windows are not supported.
 
 **`TimedConfig` fields:**
 
@@ -748,7 +759,7 @@ Seven all-day health-monitoring types and timed PPG monitoring share `TimedConfi
 | `endHour` | `int` | Fixed to 23 |
 | `endMin` | `int` | Fixed to 59 |
 
-Use `copyWith(...)` to change the switch or interval while retaining other fields. Custom time fields are ignored and normalized to the full day.
+Use `copyWith(...)` to change the switch or interval while retaining other fields. Keep the start and end fields at the fixed full-day values shown above.
 
 ###### 3.2.2.2.1 Get and Set Heart-Rate Monitoring
 
@@ -783,7 +794,7 @@ Use `copyWith(...)` to change the switch or interval while retaining other field
 | Method / Stream | Parameters | Returns | Description |
 |-----------------|------------|---------|-------------|
 | `syncAllHealthData()` | None | `Future<void>` | Start full health-data synchronization |
-| `removeHealthDataCallback()` | None | `Future<void>` | Stop forwarding subsequent sync events to Flutter |
+| `removeHealthDataCallback()` | None | `Future<void>` | Stop further health-sync event callbacks |
 | `onSyncProgress` | — | `Stream<double>`, value 100 | Completion marker, immediately followed by `onSyncFinish` |
 | `onSyncResult` | — | `Stream<SyncResult>` | Synchronized data |
 | `onSyncFinish` | — | `Stream<void>` | Synchronization complete |
@@ -875,19 +886,103 @@ Each `muslimCount` date object contains:
 
 #### 3.2.3 OTA Upgrade
 
+##### 3.2.3.1 Get Available Firmware
+
+The available firmware list can be retrieved from the following endpoint:
+
+```http
+GET https://ruiwo168.com/api/device/getOtaListByModel?model=<deviceClazz>
+```
+
+The `model` query parameter corresponds to the `deviceClazz` returned by
+`getFirmwareVersion()`. Read the device firmware information first and pass its
+actual `deviceClazz` as `model`:
+
+```dart
+import 'dart:convert';
+import 'dart:io';
+
+final firmware = await ring.getFirmwareVersion();
+final uri = Uri.https(
+  'ruiwo168.com',
+  '/api/device/getOtaListByModel',
+  {'model': firmware.deviceClazz},
+);
+
+final client = HttpClient();
+try {
+  final request = await client.getUrl(uri);
+  final response = await request.close();
+  final body = await response.transform(utf8.decoder).join();
+  final result = jsonDecode(body) as Map<String, dynamic>;
+} finally {
+  client.close();
+}
+```
+
+Example response:
+
+```json
+{
+  "code": 0,
+  "msg": "Success",
+  "data": [
+    {
+      "deviceModel": "DEVICE_MODEL",
+      "toVersion": "X.Y.Z",
+      "size": 123456,
+      "downloadUrl": "https://example.com/path/firmware.bin"
+    }
+  ]
+}
+```
+
+Only the following fields in `data` are required for the OTA workflow. Other
+fields can be ignored:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `deviceModel` | `String` | Device model supported by the firmware; it must exactly match the `deviceClazz` returned by `getFirmwareVersion()` |
+| `toVersion` | `String` | Version of the firmware package referenced by `downloadUrl`; upgrade only when it is newer than the device's current version |
+| `size` | `int` | Firmware file size in bytes |
+| `downloadUrl` | `String` | Firmware file download URL |
+
+The device's current firmware version is the `deviceNo` returned by
+`getFirmwareVersion()`, and the target version is the `toVersion` returned by
+the endpoint. Compare them before downloading or starting OTA, and proceed only
+when `toVersion` is newer than `deviceNo`. Do not upgrade to the same or an older
+version. For versions in `X.Y.Z` format, compare each segment numerically rather
+than comparing the raw strings (for example, `2.10.0` is newer than `2.9.0`). If
+a version does not follow the expected format or cannot be compared, stop the
+upgrade and verify the version information.
+
+If the customer manages firmware upgrades on their own server, they can download
+the corresponding `.bin` package from `downloadUrl`, store it on their server,
+and maintain the mapping between `deviceModel`, `toVersion`, and the firmware
+package. `toVersion` is the version of that firmware package.
+
+Download the firmware from `downloadUrl` to the app's local storage, then pass
+the local file path to `ringOta(path)`. Before starting OTA, verify again that
+`deviceModel` exactly matches the device's `deviceClazz`.
+
+##### 3.2.3.2 Start and Monitor OTA
+
 > [!CAUTION]
-> OTA firmware must be provided by the device vendor. First call `getFirmwareVersion()` and confirm that its non-empty `deviceClazz` exactly matches the non-empty model declared for the firmware file. Do not upgrade if they differ; mismatched firmware may make the device unusable.
+> Use only firmware provided by the endpoint above. First call `getFirmwareVersion()` and confirm that its non-empty `deviceClazz` exactly matches the non-empty `deviceModel` returned by the endpoint, and that `toVersion` is newer than the device's current `deviceNo`. Do not upgrade if the models differ, the target version is not newer, or the versions cannot be compared; an incompatible upgrade may make the device unusable.
+
+The app performs version comparison when selecting firmware. The following
+example only demonstrates model validation and starting OTA.
 
 ```dart
 final firmware = await ring.getFirmwareVersion();
-const otaDeviceClazz = '<model declared by the device vendor>';
-const otaPath = '<local path to the firmware file>';
+const otaDeviceModel = '<deviceModel returned by the endpoint>';
+const otaPath = '<local path to the downloaded .bin firmware file>';
 if (firmware.deviceClazz.isEmpty ||
-    otaDeviceClazz.isEmpty ||
-    firmware.deviceClazz != otaDeviceClazz) {
+    otaDeviceModel.isEmpty ||
+    firmware.deviceClazz != otaDeviceModel) {
   throw StateError(
     'OTA model mismatch: device=${firmware.deviceClazz}, '
-    'firmware=$otaDeviceClazz',
+    'firmware=$otaDeviceModel',
   );
 }
 await ring.ringOta(otaPath);
@@ -899,7 +994,7 @@ await ring.ringOta(otaPath);
 | `onOtaProgress` | — | `Stream<double>` 0.0–1.0 | OTA progress |
 | `onOtaFinish` | — | `Stream<OtaResult>` | OTA completion |
 
-The Android bridge clamps OTA progress to `0.0–1.0`. The current Android SDK has been verified to report `0.0–1.0`; the `0–100` conversion branch is only defensive compatibility code and has not been observed with this SDK version.
+OTA progress ranges from `0.0` to `1.0`.
 
 **`OtaResult` fields:**
 
@@ -956,7 +1051,7 @@ Enable this feature only when `FunctionMenu.supportsWorkout == true`. Query devi
 | `duration` | `int` | Workout duration in seconds |
 | `steps` | `int` | Step count |
 | `distance` | `int` | Distance in m |
-| `calorie` | `int` | Calories in Cal; Android is normalized to iOS semantics |
+| `calorie` | `int` | Calories in Cal |
 | `heartRate` | `int` | Real-time heart rate |
 | `dataType` | `WorkoutDataType` | Always `appWorkoutData` in the public contract |
 | `rawDataType` | `int` | Always `0x0223` in the public contract |
@@ -983,7 +1078,7 @@ Enable this feature only when `FunctionMenu.supportsWorkout == true`. Query devi
 | `date` | `String` | Date in `yyyyMMdd` format |
 | `sportType` | `int` | Sport type |
 | `duration` | `int` | Duration in seconds |
-| `step` / `distance` / `calorie` | `int` | Steps / distance in m / calories in Cal; Android is normalized to iOS semantics |
+| `step` / `distance` / `calorie` | `int` | Steps / distance in m / calories in Cal |
 | `height` / `pressure` | `int` | Height / air pressure |
 | `cadence` / `speed` / `pace` | `int` / `double` / `int` | Cadence / speed in m/h / pace |
 | `averageHeartRate` | `int` | Average heart rate |
@@ -1052,7 +1147,7 @@ final reports = await ring.getWorkoutReports();
 |-----------------|------------|---------|-------------|
 | `controlSensorRaw(bool enabled, SensorRawSelection selection)` | `enabled`: enable state; `selection`: valid collection combination | `Future<void>` | Control raw-data collection |
 | `onSensorRawData` | — | `Stream<SensorRawPacket>` | Device-originated raw-data packets |
-| `onSensorRawStopped` | — | `Stream<SensorRawStoppedEvent>` | Device stopped collection; `reason` is the stop reason, and 0 means the native SDK supplied none |
+| `onSensorRawStopped` | — | `Stream<SensorRawStoppedEvent>` | Device stopped collection; `reason` is the stop reason, and 0 means no reason was provided |
 
 When leaving the collection page, call `controlSensorRaw(false, selection)` with the same `selection`.
 
@@ -1109,7 +1204,7 @@ try {
 }
 ```
 
-`code == 0` means success and is consumed internally; `code != 0` throws an exception.
+Successful calls return normally; failed calls throw `RwfitException`.
 
 ### 4.2 Key Constraints
 
@@ -1121,7 +1216,7 @@ try {
 | **App-side capability gating** | Use `FunctionMenu.raw` to disable or hide controls; the plugin does not gate them |
 | **Android 12+ permissions** | Request `BLUETOOTH_SCAN` and `BLUETOOTH_CONNECT` at runtime |
 | **iOS device identifier** | Associate devices by `uuid`, not MAC; call `iosSetBindedStatus(true)` before reconnecting |
-| **EventSink cleanup** | Cancel all stream subscriptions when the page is disposed to avoid duplicate events |
+| **Stream subscription cleanup** | Cancel all stream subscriptions when the page is disposed to avoid duplicate events |
 | **Platform-exclusive methods** | Usually no-op on the inapplicable platform; returning without error does not mean the feature ran, so app logic must branch by platform |
 
 ### 4.3 Reconnection and Device Persistence
@@ -1217,7 +1312,7 @@ Future<void> connectAndRead() async {
 
 **v0.0.3_20260731** (2026.07.31)
 
-- Improved the Android/iOS bridges and aligned capability keys, events, and error semantics
+- Aligned Android/iOS capability keys, events, and error semantics
 - Added timed monitoring, health alerts, device controls, and raw sensor data features
 - Added real-time measurement completion events and refined health sync and connection-state handling
 - Added capability-based gating and related feature pages to the demo
@@ -1231,6 +1326,6 @@ Future<void> connectAndRead() async {
 
 ---
 
-## Contact / Technical Support
+## Contact and Technical Support
 
 developer@dhouse88.com
