@@ -19,5 +19,3 @@ FOUNDATION_EXPORT double DHBleSDKVersionNumber;
 FOUNDATION_EXPORT const unsigned char DHBleSDKVersionString[];
 
 // In this header, you should import all the public headers of your framework using statements like #import <DHBleSDK/PublicHeader.h>
-
-

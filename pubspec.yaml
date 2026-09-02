@@ -1,6 +1,6 @@
 name: rwfit_ble
 description: "RWFIT smart ring BLE Flutter plugin for scanning, connectivity, health monitoring, device control, data synchronization, and OTA updates."
-version: 0.0.6
+version: 0.0.7
 homepage: https://github.com/RWFitSDK/RW_flutter_plugin
 repository: https://github.com/RWFitSDK/RW_flutter_plugin
 issue_tracker: https://github.com/RWFitSDK/RW_flutter_plugin/issues

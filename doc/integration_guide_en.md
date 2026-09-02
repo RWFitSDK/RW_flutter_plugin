@@ -21,7 +21,7 @@
 
 - Dart SDK `^3.12.0`, Flutter `>=3.3.0`
 - Android minSdk **26**, compileSdk 35
-- iOS **12.0+**; testing requires a **real device**
+- iOS **12.0+**; simulator builds and execution are supported, while BLE features require a physical device
 
 ### 1.2 Terminology
 
@@ -35,8 +35,8 @@
 
 1. Use this plugin together with the `example/` project where possible. For a basic integration, focus on the scan page and device page.
 2. All request/response methods return a `Future` and throw `RwfitException(code, message)` on failure. Events are typed `Stream`s; call `cancel()` in the page's `dispose` to avoid duplicate events.
-3. **iOS simulators are not supported**. Simulators have no usable Bluetooth path for this plugin, and simulator architectures are excluded, so builds for an Apple Silicon simulator fail. Use a real device.
-4. **Delivery is a GitHub repository plus a git dependency**. [`RWFitSDK/RW_flutter_plugin`](https://github.com/RWFitSDK/RW_flutter_plugin) includes `example/`, the bundled native SDKs (Android AAR in `android/repo/` and a vendored iOS `DHBleSDK.framework`), and Dart source. Pin a tag in the app's git dependency; no separate SDK files are required.
+3. **iOS simulator builds and execution are supported**, but a simulator cannot scan for or connect to physical Bluetooth devices. Use a physical device to test BLE features.
+4. **Delivery is a GitHub repository plus a git dependency**. [`RWFitSDK/RW_flutter_plugin`](https://github.com/RWFitSDK/RW_flutter_plugin) includes `example/`, the bundled native SDKs (Android AAR in `android/repo/` and a vendored iOS `DHBleSDK.xcframework`), and Dart source. Pin a tag in the app's git dependency; no separate SDK files are required.
 
 ---
 
@@ -50,7 +50,7 @@ After cloning the repository, `example/` already uses a path dependency that poi
 git clone https://github.com/RWFitSDK/RW_flutter_plugin.git
 cd RW_flutter_plugin/example
 flutter pub get
-flutter run   # iOS requires a real device
+flutter run   # iOS simulators work; BLE features require a physical device
 ```
 
 To integrate the plugin into your own app, declare a git dependency in the app's `pubspec.yaml` and pin the release tag with `ref`. No files need to be copied and no separate RW SDK is required:
@@ -61,7 +61,7 @@ dependencies:
   rwfit_ble:
     git:
       url: https://github.com/RWFitSDK/RW_flutter_plugin.git
-      ref: v0.0.5   # Pin the version; change this when upgrading
+      ref: v0.0.7   # Pin the version; change this when upgrading
   # Used by the permission example below. You may use the app's existing
   # permission-management solution instead.
   permission_handler: ^12.0.2
@@ -123,6 +123,8 @@ allprojects {
 Android 12+ requires runtime requests for `BLUETOOTH_SCAN` and `BLUETOOTH_CONNECT`.
 
 **iOS**
+
+The iOS SDK is provided as `DHBleSDK.xcframework` with both device and simulator slices. A simulator can be used for builds and UI debugging, but it cannot scan for or connect to physical Bluetooth devices.
 
 `Info.plist`:
 
@@ -1298,6 +1300,10 @@ Future<void> connectAndRead() async {
 ---
 
 ## Flutter Plugin Revision History
+
+**v0.0.7_20260902** (2026.09.02)
+
+- Updated the iOS SDK to an XCFramework containing device and simulator slices, enabling iOS Simulator builds and execution
 
 **v0.0.5_20260815** (2026.08.15)
 

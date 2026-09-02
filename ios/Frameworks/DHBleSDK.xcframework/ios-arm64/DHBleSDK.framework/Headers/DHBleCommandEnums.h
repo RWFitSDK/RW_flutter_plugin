@@ -13,6 +13,8 @@
 #define BluetoothNotificationHealthDataChange @"BluetoothNotificationHealthDataChange"
 
 #define BluetoothNotificationHealthRingMeasureValueChange @"BluetoothNotificationHealthRingMeasureValueChange"
+// Protocol flag 0x21 设备主动推送；userInfo: dataType(DHDevicePushType)、dataValue、timestamp(Unix毫秒)
+#define BluetoothNotificationProtocolPush @"BluetoothNotificationProtocolPush"
 //健康戒指手动测量改变
 #define BluetoothNotificationHealthRingMeasureStateChange @"BluetoothNotificationHealthRingMeasureStateChange"
 
@@ -85,7 +87,6 @@ typedef enum : UInt8 {
     BLE_KEY_FLAG_READ_CONTINUE = 0x11,
     BLE_KEY_FLAG_CREATE = 0x20, //增操作，指令版本0
     BLE_KEY_FLAG_DELETE = 0x30, //删操作，指令版本0
-    BLE_KEY_FLAG_PUSH = 0x40, //设备主动PUSH,APP不需要回复
     BLE_KEY_FLAG_NONE
 } BleKeyFlag;
 
@@ -187,7 +188,7 @@ typedef enum : UInt16 {
      BLE_KEY_CHILD_APP_SWITCH = 0x026D, //游戏手表应用控制开关(游戏 、睡前故事、音乐、学习卡片、有声故事)
      BLE_KEY_BLOOD_SUGAR_MONITORING = 0x026E,
      BLE_KEY_MUSLIM_COUNT_CLEAR = 0x026F, //Muslim清除
-    
+
      BLE_KEY_BACK_LIGHT_SPEC = 0x0272, //有连接APP时的亮屏时长，以分钟为单位
      BLE_KEY_REMIND_TIME = 0x0273, //目标达成提醒的时长设置
      BLE_KEY_ENTER_OR_EXIT_WORKOUT = 0x0274, //1 进入多运动, 0退出多运动
@@ -207,7 +208,8 @@ typedef enum : UInt16 {
      BLE_KEY_ALARM_VIBRATION_DURATION = 0x0282,// 闹钟震动时长设置
      BLE_KEY_VIBRATION_INTERVAL = 0x0283,   // 震动间隔时长设置
      BLE_KEY_COUNT_REMINDER_INTERVAL = 0x0284, // 计数提醒间隔设置
-    
+     BLE_KEY_SCREEN_CONTROL = 0x0285, // 即时屏幕亮灭控制
+
      REALTIME_LOG = 0x02F9,
      BLE_KEY_GSENSOR_OUTPUT = 0x02FA, // 1: 开启GSensor输出；2: 关闭GSensor输出
      BLE_KEY_GSENSOR_RAW = 0x02FB,    // G-Sensor原始数据
@@ -215,12 +217,13 @@ typedef enum : UInt16 {
      BLE_KEY_LOCATION_GGA = 0x02FD, // 设备定位GGA数据
      BLE_KEY_RAW_SLEEP = 0x02FE, // 睡眠算法的原始数据
      BLE_KEY_NO_DISTURB_GLOBAL = 0x02FF,
-    
+
 
      // CONNECT
      BLE_KEY_IDENTITY = 0x0301,     // 身份，代表绑定的意思
      BLE_KEY_SESSION = 0x0302,      // 会话，代表登陆的意思
      BLE_KEY_REQUEST_PAIR = 0x0303, // 请求配对
+     BLE_KEY_DEVICE_PASSWORD = 0x0304, // 设备密码认证、修改与授权重置
 
      // PUSH
      BLE_KEY_NOTIFICATION = 0x0401,
@@ -268,7 +271,7 @@ typedef enum : UInt16 {
     BLE_KEY_WORKOUT3 = 0x051C, //戒指多运动数据,带有心率详情数据;区别与BLE_KEY_WORKOUT2
     BLE_KEY_SMOKING_DETAIL_DATA_CURRENT_DAY = 0x051D, //电子烟明细数据,当天数据
     BLE_KEY_SENSOR_HISTORY_RAW = 0x051E,    // Sensor原始数据 历史方式获取
-    
+
      // CONTROL
      BLE_KEY_CAMERA = 0x0601,
      BLE_KEY_REQUEST_LOCATION = 0x0602,
@@ -279,7 +282,7 @@ typedef enum : UInt16 {
      BLE_KEY_SMS_QUICK_REPLY = 0x0607,
      BLE_KEY_LOVETAP = 0x0608,
      BLE_KEY_APP_DATA_CONTROL = 0x0609, //健康数据检测控制 DATA Key + start/end
-     
+
      BLE_KEY_APP_CONTROL_COUNT = 0x0610,//APP控制戒指在线进入念珠模式, 2字节目标值+2字节初始值(小端)
      BLE_KEY_COUPLE_INTERACTION = 0x0611, //情侣功能互动
      BLE_KEY_APP_FOREGROUND_BACKGROUND = 0x0612, //app进前后台 1 前台 2后台; 实时更新步数等需要.
@@ -302,6 +305,12 @@ typedef enum : UInt16 {
      BLE_KEY_ALL_BIN_DATA_PXI = 0x070C, //原相大包升级(所有bin组合)
      BLE_KEY_NONE = 0xffff
 } BleKey;
+
+/// SDK 已公开支持的设备主动推送(Protocol flag 0x21)类型。
+/// 枚举值与对应协议 Key 保持一致，便于跨端识别以及与日志、抓包直接对应。
+typedef enum : UInt16 {
+    DHDevicePushTypePower = BLE_KEY_POWER
+} DHDevicePushType;
 
 typedef enum {
     BLE_ACTIVITY_START_INDEX = 7,        // 枚举值开始标记
@@ -414,8 +423,8 @@ typedef enum {
     BLE_ACTIVITY_BODY_BALANCE = 113,      // BODY BALANCE    7 MET/70KG/60分钟/514千卡  瑜伽、太极和普拉提融合在一起的身心训练项目
     BLE_ACTIVITY_TRX = 114,               // TRX             7 MET/70KG/60分钟/514千卡 全身抗阻力锻炼 全身抗阻力锻炼
     BLE_ACTIVITY_TAE_BO = 115,            // 跆搏（TAE BO）   7 MET/70KG/60分钟/514千卡 集跆拳道、空手道、拳击、自由搏击、舞蹈韵律操为一体
-    
-    
+
+
     BLE_ACTIVITY_BMX = 116,              // 小轮车         //竞赛
     BLE_ACTIVITY_STRETCHING = 117,       // 拉伸           //训练
     BLE_ACTIVITY_INDOOR_FINESS = 118,     // 室内健身       //训练

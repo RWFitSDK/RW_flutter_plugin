@@ -21,7 +21,7 @@
 
 - Dart SDK `^3.12.0`、Flutter `>=3.3.0`
 - Android minSdk **26**、compileSdk 35
-- iOS **12.0+**，需**真机**测试
+- iOS **12.0+**；支持模拟器构建和运行，蓝牙功能需使用真机测试
 
 ### 1.2 相关术语
 
@@ -35,8 +35,8 @@
 
 1. 使用此插件最好结合示例工程 `example/`；参考例子只需关注扫描页与设备页两个页面代码即可。
 2. 所有请求-响应方法返回 `Future`，失败抛 `RwfitException(code, message)`；事件流为 typed `Stream`，页面 `dispose` 时须 `cancel()`，避免事件叠加。
-3. **iOS 不支持模拟器**（模拟器无蓝牙；且插件已排除模拟器架构，Apple Silicon Mac 上跑模拟器会直接编译失败），请用真机。
-4. **交付形式为 GitHub 仓库 + git 依赖**：仓库 [`RWFitSDK/RW_flutter_plugin`](https://github.com/RWFitSDK/RW_flutter_plugin) 含 `example/`、内置原生 SDK（Android aar 在 `android/repo/`，iOS `DHBleSDK.framework` 已 vendored）、Dart 源码。App 通过 git 依赖引入，用 tag 锁版本，无需额外 SDK 文件。
+3. **iOS 支持模拟器构建和运行**，但模拟器无法扫描或连接真实蓝牙设备；蓝牙功能请使用真机测试。
+4. **交付形式为 GitHub 仓库 + git 依赖**：仓库 [`RWFitSDK/RW_flutter_plugin`](https://github.com/RWFitSDK/RW_flutter_plugin) 含 `example/`、内置原生 SDK（Android AAR 在 `android/repo/`，iOS `DHBleSDK.xcframework` 已 vendored）、Dart 源码。App 通过 git 依赖引入，用 tag 锁版本，无需额外 SDK 文件。
 
 ---
 
@@ -50,7 +50,7 @@
 git clone https://github.com/RWFitSDK/RW_flutter_plugin.git
 cd RW_flutter_plugin/example
 flutter pub get
-flutter run   # iOS 需真机
+flutter run   # iOS 模拟器可运行；蓝牙功能需真机
 ```
 
 集成进你自己的 App：在 App 的 `pubspec.yaml` 声明 git 依赖（用 `ref` 锁定版本 tag），无需拷贝任何文件、无需单独获取 RW SDK：
@@ -61,7 +61,7 @@ dependencies:
   rwfit_ble:
     git:
       url: https://github.com/RWFitSDK/RW_flutter_plugin.git
-      ref: v0.0.5   # 锁定版本，升级时改这里
+      ref: v0.0.7   # 锁定版本，升级时改这里
   # 下方权限申请示例使用；也可替换为 App 现有的权限管理方案
   permission_handler: ^12.0.2
 ```
@@ -122,6 +122,8 @@ allprojects {
 Android 12+ 需**运行时动态申请** `BLUETOOTH_SCAN`/`BLUETOOTH_CONNECT`。
 
 **iOS**
+
+iOS SDK 以同时包含真机和模拟器切片的 `DHBleSDK.xcframework` 提供。模拟器可用于构建和界面调试，但不能扫描或连接真实蓝牙设备。
 
 `Info.plist`：
 
@@ -1283,6 +1285,10 @@ Future<void> connectAndRead() async {
 ---
 
 ## Flutter 插件修订记录
+
+**v0.0.7_20260902** (2026.09.02)
+
+- iOS SDK 更新为同时包含真机和模拟器切片的 XCFramework，支持 iOS 模拟器构建和运行
 
 **v0.0.5_20260815** (2026.08.15)
 

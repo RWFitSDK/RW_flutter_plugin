@@ -65,7 +65,7 @@
     } else if ([m isEqualToString:@"getSDKVersion"]) {
         [self ok:result extra:@{@"version": [DHBleCommand getSDKVersion] ?: @""}];
     } else if ([m isEqualToString:@"getPluginVersion"]) {
-        NSString *v = [NSString stringWithFormat:@"0.0.5_%@", [DHBleCommand getSDKVersion] ?: @""];
+        NSString *v = [NSString stringWithFormat:@"0.0.7_%@", [DHBleCommand getSDKVersion] ?: @""];
         [self ok:result extra:@{@"pluginVersion": v}];
     } else if ([m isEqualToString:@"isBleConnected"]) {
         [self ok:result extra:@{@"connected": @([DHBleCentralManager isConnected])}];

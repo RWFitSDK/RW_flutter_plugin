@@ -13,7 +13,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 /// 时长（秒 0-255，0表示常亮）
 @property (nonatomic, assign) NSInteger duration;
-@property (nonatomic, strong) NSString *durationNums; 
+@property (nonatomic, strong) NSString *durationNums;
 @property (nonatomic, assign) NSInteger muslimMode; //0自定义 1默认
 
 @property (nonatomic, assign) NSInteger sleepOpen;

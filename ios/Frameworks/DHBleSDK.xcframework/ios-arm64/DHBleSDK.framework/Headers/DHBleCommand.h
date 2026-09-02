@@ -10,7 +10,6 @@
 
 #import <DHBleSDK/DHFirmwareVersionModel.h>
 #import <DHBleSDK/DHBatteryInfoModel.h>
-#import <DHBleSDK/DHTimeSetModel.h>
 #import <DHBleSDK/DHDeviceInfoModel.h>
 
 #import <DHBleSDK/DHBindSetModel.h>
@@ -53,9 +52,20 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface DHBleCommand : NSObject
 
-#pragma mark - 基础功能指令
+#pragma mark - SDK信息
 
 + (NSString *)getSDKVersion;
+
+#pragma mark - 设备密码
+
+/// 连接前设置SDK自动认证使用的4位数字密码；空字符串按0000处理。
++ (void)prepareAutoPassword:(nullable NSString *)password;
+/// 修改设备密码并返回本次指令结果；正常解绑前应先修改为0000。
++ (void)modifyDevicePwd:(nullable NSString *)password completion:(void (^ _Nullable)(BOOL success))completion;
+/// 业务端确认重置权限后，为下一次连接准备新的4位目标密码。
++ (void)preparePasswordReset:(nullable NSString *)targetPassword;
+
+#pragma mark - 基础功能指令
 
 + (void)ringGetMacAddress:(void(^)(int code, id data))block;
 
@@ -66,6 +76,12 @@ NS_ASSUME_NONNULL_BEGIN
 /// 获取电量信息
 /// @param block 回调
 + (void)getBattery:(void(^)(int code, id data))block;
+
+/// 设置自定义设备时间，精确到秒，仅建议用于调试或演示。SDK每次连接初始化时都会同步手机当前时间，因此重新连接后自定义时间会被覆盖。
+/// Sets a custom device time with second-level precision. This API is intended only for debugging or demonstrations. The SDK synchronizes the phone's current time during each connection initialization, so the custom time is overwritten after reconnecting.
+/// @param targetTime Unix时间戳，单位秒；按手机当前时区转换为设备显示时间 / Unix timestamp in seconds, converted using the phone's current time zone
+/// @param block 执行结果回调 / Execution result callback
++ (void)setDeviceTime:(NSTimeInterval)targetTime block:(void(^)(int code, id data))block;
 
 /// 设置个人信息
 /// @param model 模型
@@ -213,6 +229,15 @@ NS_ASSUME_NONNULL_BEGIN
 /// @param interval 0:关闭 30/60/90/120:分钟
 /// @param block 回调
 + (void)setCountReminderInterval:(UInt8)interval block:(void(^)(int code, id data))block;
+
+/// 获取当前瞬时屏幕状态
+/// @param block 回调，data为NSNumber（NO息屏/YES亮屏）；查询不会重置亮屏倒计时
++ (void)getScreenOn:(void(^)(int code, id data))block;
+
+/// 即时控制屏幕亮灭，不修改设备已保存的亮屏时长
+/// @param isOn YES：立即亮屏或重置亮屏倒计时；NO：立即息屏
+/// @param block 执行结果回调
++ (void)setScreenOn:(BOOL)isOn block:(void(^)(int code, id data))block;
 
 #pragma mark- 传感器原始数据
 
