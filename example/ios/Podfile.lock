@@ -1,6 +1,6 @@
 PODS:
   - Flutter (1.0.0)
-  - rwfit_ble (0.0.7):
+  - rwfit_ble (0.0.8):
     - Flutter
 
 DEPENDENCIES:
@@ -15,7 +15,7 @@ EXTERNAL SOURCES:
 
 SPEC CHECKSUMS:
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
-  rwfit_ble: b1805d649933780a2debb651c2e014bd16cc8b0a
+  rwfit_ble: 7cabc8bc8b9af43805b8887a65f5a77e7e06bcc2
 
 PODFILE CHECKSUM: 3c63482e143d1b91d2d2560aee9fb04ecc74ac7e
 

@@ -53,7 +53,7 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
         EventChannel.StreamHandler, ActivityAware {
 
     private static final String TAG = "RwfitBlePlugin";
-    private static final String PLUGIN_VERSION = "0.0.7";
+    private static final String PLUGIN_VERSION = "0.0.8";
 
     private MethodChannel methodChannel;
     private EventChannel eventChannel;
@@ -464,18 +464,10 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
             DHBleSdk.INSTANCE.subscribeData(workoutRealtimeCallback);
         }
 
-        DHBleSdk.INSTANCE.subscribeData(new SportDataPushCallback() {
-            @Override public void onResult(SportDataPushBean data) {}
-            @Override public void onFail(int errorCode) {
-                result.error(errorCode, "setWorkoutRealtimeEnabled failed");
-                DHBleSdk.INSTANCE.dispose(this);
-            }
-            @Override public void onSuccess() {
-                result.success(success());
-                DHBleSdk.INSTANCE.dispose(this);
-            }
-        });
+        // 设备对进入/退出多运动的应答帧即实时数据帧（会被 push 数据冲掉，设备侧问题），
+        // 回调不可靠；两端一致：调用后立即返回成功，数据经 SportDataPushCallback.onResult 推送。
         DHBleSdk.INSTANCE.setExerciseMore(enabled ? 1 : 0);
+        result.success(success());
     }
 
     private void getWorkoutReports(final Reply result) {
@@ -521,9 +513,8 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
         report.put("height", item.getHeight());
         report.put("pressure", item.getBarometricPressure());
         report.put("cadence", item.getCadence());
-        // AAR 按大端整数读取了线序中的小端 IEEE-754 float，先反转字节再按位还原。
-        report.put("speed", (double) Float.intBitsToFloat(
-                Integer.reverseBytes(item.getSpeed())));
+        // 新 AAR（2.260909 起）getSpeed 直接返回 float；旧版需反转字节还原，已废弃。
+        report.put("speed", (double) item.getSpeed());
         report.put("pace", item.getPace());
         report.put("averageHeartRate", item.getAverageHr());
         report.put("maxHeartRate", item.getMaxHr());

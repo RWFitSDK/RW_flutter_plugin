@@ -65,7 +65,7 @@
     } else if ([m isEqualToString:@"getSDKVersion"]) {
         [self ok:result extra:@{@"version": [DHBleCommand getSDKVersion] ?: @""}];
     } else if ([m isEqualToString:@"getPluginVersion"]) {
-        NSString *v = [NSString stringWithFormat:@"0.0.7_%@", [DHBleCommand getSDKVersion] ?: @""];
+        NSString *v = [NSString stringWithFormat:@"0.0.8_%@", [DHBleCommand getSDKVersion] ?: @""];
         [self ok:result extra:@{@"pluginVersion": v}];
     } else if ([m isEqualToString:@"isBleConnected"]) {
         [self ok:result extra:@{@"connected": @([DHBleCentralManager isConnected])}];
@@ -255,10 +255,11 @@
             [self simple:code result:result action:@"controlWorkout"];
         }];
     } else if ([m isEqualToString:@"setWorkoutRealtimeEnabled"]) {
+        // 设备对进入/退出多运动的应答帧即实时数据帧（会被 push 数据冲掉，设备侧问题），
+        // 回调不可靠；两端一致：调用后立即返回成功，数据经推送回调继续上报。
         UInt8 enabled = [args[@"enabled"] boolValue] ? 1 : 0;
-        [DHBleCommand setRingEnterWorkOut:enabled block:^(int code, id data) {
-            [self simple:code result:result action:@"setWorkoutRealtimeEnabled"];
-        }];
+        [DHBleCommand setRingEnterWorkOut:enabled block:^(int code, id data) {}];
+        [self ok:result extra:nil];
     } else if ([m isEqualToString:@"getWorkoutReports"]) {
         [self getWorkoutReports:result];
     } else if ([m isEqualToString:@"syncAllHealthData"]) {

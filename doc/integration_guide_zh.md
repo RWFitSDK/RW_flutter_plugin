@@ -20,7 +20,7 @@
 ### 1.1 适用平台与语言
 
 - Dart SDK `^3.12.0`、Flutter `>=3.3.0`
-- Android minSdk **26**、compileSdk 35
+- Android minSdk **24**（Android 7.0 及以上）、compileSdk 35
 - iOS **12.0+**；支持模拟器构建和运行，蓝牙功能需使用真机测试
 
 ### 1.2 相关术语
@@ -61,7 +61,7 @@ dependencies:
   rwfit_ble:
     git:
       url: https://github.com/RWFitSDK/RW_flutter_plugin.git
-      ref: v0.0.7   # 锁定版本，升级时改这里
+      ref: v0.0.8   # 锁定版本，升级时改这里
   # 下方权限申请示例使用；也可替换为 App 现有的权限管理方案
   permission_handler: ^12.0.2
 ```
@@ -76,9 +76,9 @@ flutter pub get          # 升级版本改 ref 后：flutter pub upgrade rwfit_b
 
 **Android**
 
-`android/app/build.gradle.kts`：`minSdk = 26`
+`android/app/build.gradle.kts`：`minSdk = 24`
 
-> ⚠️ **必需：注册插件内置的原生 SDK 仓库**。`pub get` 成功 ≠ 能构建。插件随包内置了 RW 戒指原生 SDK 的 AAR（`com.rwfit:blesdk-rwfit`），位于插件目录的 `android/repo`。**Gradle 解析 `:app` 的传递依赖时用的是 App 自己的仓库列表，插件内部声明的仓库不会传递过来**，所以必须在 **App 侧**把插件目录下的 `repo` 注册为本地 maven 仓库，否则构建报 `Could not find com.rwfit:blesdk-rwfit:2.260724`。详见「第 2 步：平台配置」。
+> ⚠️ **必需：注册插件内置的原生 SDK 仓库**。`pub get` 成功 ≠ 能构建。插件随包内置了 RW 戒指原生 SDK 的 AAR（`com.rwfit:blesdk-rwfit`），位于插件目录的 `android/repo`。**Gradle 解析 `:app` 的传递依赖时用的是 App 自己的仓库列表，插件内部声明的仓库不会传递过来**，所以必须在 **App 侧**把插件目录下的 `repo` 注册为本地 maven 仓库，否则构建报 `Could not find com.rwfit:blesdk-rwfit:2.260920`。详见「第 2 步：平台配置」。
 
 在你的 App 根目录 `android/build.gradle.kts` 的 `allprojects.repositories` 中加一行（Kotlin DSL）：
 
@@ -1032,6 +1032,8 @@ OTA 进度范围为 `0.0–1.0`。
 | `setWorkoutRealtimeEnabled(bool enabled)` | 是否开启实时数据 | `Future<void>` | 进入运动页面时开启，离开页面时关闭 |
 | `onWorkoutRealtimeData` | — | `Stream<WorkoutRealtimeData>` | 实时运动统计 |
 
+连接设备后，先订阅 `onWorkoutRealtimeData`，再调用 `setWorkoutRealtimeEnabled(true)` 开启实时数据；离开运动页面时调用 `setWorkoutRealtimeEnabled(false)`，并取消订阅。
+
 **`WorkoutRealtimeData` 字段：**
 
 | 字段 | 类型 | 说明 |
@@ -1285,6 +1287,12 @@ Future<void> connectAndRead() async {
 ---
 
 ## Flutter 插件修订记录
+
+**v0.0.8_20260920** (2026.09.20)
+
+- 修复开启/关闭实时运动数据时调用一直等待的问题
+- Android SDK 更新至 `RW_SDK_V2.0.0_20260920`，最低支持 Android 7.0（API 24）
+- 适配新版 Android SDK 的运动报告速度字段
 
 **v0.0.7_20260902** (2026.09.02)
 

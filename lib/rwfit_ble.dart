@@ -166,6 +166,9 @@ class RwfitBle {
   }
 
   /// 开启或关闭设备实时运动数据通知。
+  ///
+  /// 连接设备后，先订阅 [onWorkoutRealtimeData]，再传入 `true` 开启实时数据。
+  /// 离开运动页面时传入 `false` 关闭，并取消订阅。
   Future<void> setWorkoutRealtimeEnabled(bool enabled) =>
       callAsync('setWorkoutRealtimeEnabled', {'enabled': enabled});
 

@@ -20,7 +20,7 @@
 ### 1.1 Supported Platforms and Languages
 
 - Dart SDK `^3.12.0`, Flutter `>=3.3.0`
-- Android minSdk **26**, compileSdk 35
+- Android minSdk **24** (Android 7.0+), compileSdk 35
 - iOS **12.0+**; simulator builds and execution are supported, while BLE features require a physical device
 
 ### 1.2 Terminology
@@ -61,7 +61,7 @@ dependencies:
   rwfit_ble:
     git:
       url: https://github.com/RWFitSDK/RW_flutter_plugin.git
-      ref: v0.0.7   # Pin the version; change this when upgrading
+      ref: v0.0.8   # Pin the version; change this when upgrading
   # Used by the permission example below. You may use the app's existing
   # permission-management solution instead.
   permission_handler: ^12.0.2
@@ -77,9 +77,9 @@ flutter pub get          # After changing ref: flutter pub upgrade rwfit_ble
 
 **Android**
 
-Set `minSdk = 26` in `android/app/build.gradle.kts`.
+Set `minSdk = 24` in `android/app/build.gradle.kts`.
 
-> ⚠️ **Required: register the plugin's bundled native SDK repository.** A successful `pub get` does not guarantee that Android can build. The RW ring native SDK AAR (`com.rwfit:blesdk-rwfit`) is bundled in the plugin's `android/repo` directory. **Gradle resolves `:app` transitive dependencies using the app's repository list; repositories declared inside the plugin do not propagate.** The app must therefore register the plugin's `repo` as a local Maven repository, or the build fails with `Could not find com.rwfit:blesdk-rwfit:2.260724`.
+> ⚠️ **Required: register the plugin's bundled native SDK repository.** A successful `pub get` does not guarantee that Android can build. The RW ring native SDK AAR (`com.rwfit:blesdk-rwfit`) is bundled in the plugin's `android/repo` directory. **Gradle resolves `:app` transitive dependencies using the app's repository list; repositories declared inside the plugin do not propagate.** The app must therefore register the plugin's `repo` as a local Maven repository, or the build fails with `Could not find com.rwfit:blesdk-rwfit:2.260920`.
 
 Add the following to `allprojects.repositories` in the app's root `android/build.gradle.kts`:
 
@@ -1046,6 +1046,8 @@ Enable this feature only when `FunctionMenu.supportsWorkout == true`. Query devi
 | `setWorkoutRealtimeEnabled(bool enabled)` | Enable state | `Future<void>` | Enable on workout-page entry and disable on exit |
 | `onWorkoutRealtimeData` | — | `Stream<WorkoutRealtimeData>` | Real-time workout statistics |
 
+After connecting the device, subscribe to `onWorkoutRealtimeData`, then call `setWorkoutRealtimeEnabled(true)` to enable real-time data. When leaving the workout page, call `setWorkoutRealtimeEnabled(false)` and cancel the subscription.
+
 **`WorkoutRealtimeData` fields:**
 
 | Field | Type | Description |
@@ -1300,6 +1302,12 @@ Future<void> connectAndRead() async {
 ---
 
 ## Flutter Plugin Revision History
+
+**v0.0.8_20260920** (2026.09.20)
+
+- Fixed calls hanging when enabling or disabling real-time workout data
+- Updated the Android SDK to `RW_SDK_V2.0.0_20260920`, with Android 7.0 (API 24) as the minimum supported version
+- Adapted workout report speed handling to the updated Android SDK
 
 **v0.0.7_20260902** (2026.09.02)
 
