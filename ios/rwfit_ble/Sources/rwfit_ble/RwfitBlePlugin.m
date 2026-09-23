@@ -695,8 +695,10 @@
                    name:BluetoothNotificationCameraTakePicture object:nil];
     [center addObserver:self selector:@selector(handleWorkoutRealtimeData:)
                    name:BluetoothNotificationRingRuningData object:nil];
-    [center addObserver:self selector:@selector(handleTouchEvent:)
-                   name:BluetoothNotificationTouchEvent object:nil];
+    // SDK 260922 起 0x21 主动推送(触摸/电量/录音状态)统一走 ProtocolPush 通知;
+    // 插件当前只消费触摸事件, dataValue 为 {keyType, touchType} 字典
+    [center addObserver:self selector:@selector(handleProtocolPush:)
+                   name:BluetoothNotificationProtocolPush object:nil];
     [center addObserver:self selector:@selector(handleSensorRawData:)
                    name:BluetoothNotificationSensorRawData object:nil];
     [center addObserver:self selector:@selector(handleSensorRawStopped:)
@@ -762,10 +764,14 @@
     }];
 }
 
-- (void)handleTouchEvent:(NSNotification *)notification {
-    NSDictionary *data = notification.userInfo ?: @{};
-    NSInteger keyType = [data[@"keyType"] integerValue];
-    NSInteger touchType = [data[@"touchType"] integerValue];
+- (void)handleProtocolPush:(NSNotification *)notification {
+    NSDictionary *userInfo = notification.userInfo ?: @{};
+    if ([userInfo[@"dataType"] unsignedIntegerValue] != DHDevicePushTypeTouchEvent) return;
+    NSDictionary *event = [userInfo[@"dataValue"] isKindOfClass:NSDictionary.class]
+        ? userInfo[@"dataValue"] : nil;
+    if (event == nil) return;
+    NSInteger keyType = [event[@"keyType"] integerValue];
+    NSInteger touchType = [event[@"touchType"] integerValue];
     [self fire:@"rwfit:touchEvent" data:@{
         @"keyType": @(keyType),
         @"touchType": @(touchType),

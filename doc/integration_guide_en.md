@@ -21,7 +21,7 @@
 
 - Dart SDK `^3.12.0`, Flutter `>=3.3.0`
 - Android minSdk **24** (Android 7.0+), compileSdk 35
-- iOS **12.0+**; simulator builds and execution are supported, while BLE features require a physical device
+- iOS **15.0+** (raised with the 260922 SDK); simulator builds and execution are supported, while BLE features require a physical device
 
 ### 1.2 Terminology
 
@@ -79,7 +79,7 @@ flutter pub get          # After changing ref: flutter pub upgrade rwfit_ble
 
 Set `minSdk = 24` in `android/app/build.gradle.kts`.
 
-> ⚠️ **Required: register the plugin's bundled native SDK repository.** A successful `pub get` does not guarantee that Android can build. The RW ring native SDK AAR (`com.rwfit:blesdk-rwfit`) is bundled in the plugin's `android/repo` directory. **Gradle resolves `:app` transitive dependencies using the app's repository list; repositories declared inside the plugin do not propagate.** The app must therefore register the plugin's `repo` as a local Maven repository, or the build fails with `Could not find com.rwfit:blesdk-rwfit:2.260920`.
+> ⚠️ **Required: register the plugin's bundled native SDK repository.** A successful `pub get` does not guarantee that Android can build. The RW ring native SDK AAR (`com.rwfit:blesdk-rwfit`) is bundled in the plugin's `android/repo` directory. **Gradle resolves `:app` transitive dependencies using the app's repository list; repositories declared inside the plugin do not propagate.** The app must therefore register the plugin's `repo` as a local Maven repository, or the build fails with `Could not find com.rwfit:blesdk-rwfit:2.260922`.
 
 Add the following to `allprojects.repositories` in the app's root `android/build.gradle.kts`:
 
@@ -691,7 +691,7 @@ When enabled, detected falls are emitted through `onTouchEvent` with `action == 
 | `startRealtimeMeasure(RealtimeMetric m)` | `m`: measurement enum | `Future<void>` | Start real-time measurement |
 | `stopRealtimeMeasure(RealtimeMetric m)` | `m`: measurement enum | `Future<void>` | Stop real-time measurement |
 | `onRealtimeData` | — | `Stream<RealtimeData>` | Real-time measurement data |
-| `onRealtimeMeasureComplete` | — | `Stream<void>` | Single-measurement completion event |
+| `onRealtimeMeasureComplete` | — | `Stream<RealtimeMeasureResult>` | Single-measurement completion event; `isSuccess=false` means failure/timeout (Android, `errorCode` carries the SDK code, 6 for timeout; iOS always reports success) |
 
 > ⚠️ **Mutual exclusion:** only one measurement type can be active. Stop the current type before starting another.
 

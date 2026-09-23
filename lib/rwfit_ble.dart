@@ -132,6 +132,9 @@ class RwfitBle {
   // ==================== 实时测量 ====================
 
   /// 同一时间只能开启一种；切换前先 [stopRealtimeMeasure]。
+  ///
+  /// Android 端 [stopRealtimeMeasure] 会等会话真正结束（收到结束帧或超时）才完成，
+  /// 失败（如超时）抛 [RwfitException]；iOS 端下发停止指令后立即完成。
   Future<void> startRealtimeMeasure(RealtimeMetric m) =>
       callAsync('controlHealthData', {'key': m.key, 'state': 1});
 
@@ -142,8 +145,12 @@ class RwfitBle {
       onEvent(RwfitEvents.healthData).map(RealtimeData.fromMap);
 
   /// 当前单次实时测量完成。应在 [startRealtimeMeasure] 前订阅。
-  Stream<void> get onRealtimeMeasureComplete =>
-      onEvent(RwfitEvents.realtimeMeasureComplete).map<void>((_) {});
+  ///
+  /// [RealtimeMeasureResult.isSuccess] 为 false 表示本次测量失败或超时（Android，
+  /// 含 [RealtimeMeasureResult.errorCode]）；iOS 完成通知不区分成功失败，恒为成功。
+  Stream<RealtimeMeasureResult> get onRealtimeMeasureComplete => onEvent(
+    RwfitEvents.realtimeMeasureComplete,
+  ).map(RealtimeMeasureResult.fromMap);
 
   // ==================== 多运动 ====================
 

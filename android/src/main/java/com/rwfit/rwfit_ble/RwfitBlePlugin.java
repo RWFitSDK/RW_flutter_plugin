@@ -27,12 +27,16 @@ import com.example.blesdk.bean.function.*;
 import com.example.blesdk.bean.sync.*;
 import com.example.blesdk.ble.ScanBleService;
 import com.example.blesdk.ble.bean.BleDevice;
+import com.example.blesdk.blering.DevicePushType;
+import com.example.blesdk.blering.HealthDataType;
+import com.example.blesdk.blering.HealthMonitorType;
+import com.example.blesdk.blering.OnDevicePushListener;
+import com.example.blesdk.blering.PushData;
 import com.example.blesdk.callback.OnFileTransferCallback;
 import com.example.blesdk.callback.data.*;
 import com.example.blesdk.callback.status.*;
 import com.example.blesdk.utils.BlueToothUtils;
 import com.example.blesdk.utils.BleActivityMode;
-import com.example.blesdk.utils.CmdConstants;
 import com.example.blesdk.utils.WorkoutControlType;
 
 import io.flutter.embedding.engine.plugins.FlutterPlugin;
@@ -61,15 +65,21 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
     private Activity activity;
     private final Handler main = new Handler(Looper.getMainLooper());
 
+    // 实时测量会话状态：SDK 回调线程与主线程都会读写，用 volatile 保证可见性。
+    // starting（开始指令已下发、ACK 未回）或 active（ACK 已回、测量中）都视为"有会话"，
+    // 停止请求一律等会话真正结束（onFinished）才回复；多个停止请求共同等待，结束时一起兑现。
+    private volatile boolean measureSessionStarting = false;
+    private volatile boolean measureSessionActive = false;
+    private final List<Reply> pendingStopReplies = new ArrayList<>();
+
     // 长期订阅引用（切换/重设时先 dispose 旧的，避免事件叠加）
-    private HealthDataBroCallback realtimeDataCallback;
-    private HealthDataControlCallback realtimeMeasureStateCallback;
     private SportDataPushCallback workoutRealtimeCallback;
     private TakePhotoCallback takePhotoEventCallback;
     private MusicPushSettingCallback musicControlEventCallback;
     private CallRemindCallback callControlEventCallback;
     private HrBoActualReminderCallback healthAlertEventCallback;
-    private TouchEventCallback touchEventCallback;
+    // SDK 2.260922 起触摸/HID 等 0x21 主动推送统一走 OnDevicePushListener（TouchEventCallback 已删除）
+    private OnDevicePushListener devicePushListener;
     private FactoryTestCallback factoryTestCallback;
     private SensorRawDataCallback sensorRawDataCallback;
     private SensorRawControlCallback sensorRawControlCallback;
@@ -475,7 +485,16 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
             @Override public void onSuccess() {}
 
             @Override public void onFail(int errorCode) {
-                result.error(errorCode, "getWorkoutReports failed");
+                // 201：设备返回空/超短帧（无已存运动报告；GET_GET_DEL 读取即删除，
+                // 同步成功后再读也为空）。iOS 对同一空帧按成功+空列表返回
+                // （RingBleDataManager.m BLE_KEY_WORKOUT3），两端对齐：无数据不算错误。
+                if (errorCode == 201) {
+                    Map<String, Object> response = success();
+                    response.put("data", toCodecSafe(new JSONArray()));
+                    result.success(response);
+                } else {
+                    result.error(errorCode, "getWorkoutReports failed");
+                }
                 DHBleSdk.INSTANCE.dispose(this);
             }
 
@@ -578,38 +597,152 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
         return result;
     }
 
+    // 实时检测统一走 SDK 3.2.2.1 会话接口 controlOpen（与 iOS controlOpen:dataType:block: 契约一致）。
+    // 实时值由会话 onData 投递（HealthRealtimeValue 已含血糖/体温 /10 归一化，血压 value=收缩/extra=舒张）；
+    // 赞念计数实时不走本通道，经 OnDevicePushListener 的 MUSLIM_COUNT 推送投递。
+    // 停止请求等会话真正结束（onFinished）才回复，避免 await stop 后过早开始下一项测量；
+    // 完成事件携带 isSuccess/errorCode（超时=6），Dart 侧可区分正常结束与失败。
     private void controlHealthData(MethodCall call, final Reply result) {
         String keyName = call.argument("key");
         Integer stateArg = call.argument("state");
         int state = stateArg != null ? stateArg : 0;
 
-        byte key;
-        switch (keyName != null ? keyName : "") {
-            case "JL_HR_DATA_TRANSFER_KEY": key = CmdConstants.JL_HR_DATA_TRANSFER_KEY; break;
-            case "JL_BO_DATA_TRANSFER_KEY": key = CmdConstants.JL_BO_DATA_TRANSFER_KEY; break;
-            case "JL_HRV_DATA_TRANSFER_KEY": key = CmdConstants.JL_HRV_DATA_TRANSFER_KEY; break;
-            case "JL_PRESSURE_DATA_TRANSFER_KEY": key = CmdConstants.JL_PRESSURE_DATA_TRANSFER_KEY; break;
-            case "JL_BLOODSUGAR_DATA_TRANSFER_KEY": key = CmdConstants.JL_BLOODSUGAR_DATA_TRANSFER_KEY; break;
-            case "JL_BP_DATA_TRANSFER_KEY": key = CmdConstants.JL_BP_DATA_TRANSFER_KEY; break;
-            case "JL_TEMP_DATA_TRANSFER_KEY": key = CmdConstants.JL_TEMP_DATA_TRANSFER_KEY; break;
-            default:
-                result.error(-1, "unknown key: " + keyName);
-                return;
+        Integer dataType = healthDataTypeCode(keyName);
+        if (dataType == null) {
+            result.error(-1, "unknown key: " + keyName);
+            return;
         }
 
-        DHBleSdk.INSTANCE.subscribeData(new HealthDataControlCallback() {
-            @Override public void onSuccess() {
+        if (state == 0) {
+            stopRealtimeMeasure(dataType, result);
+            return;
+        }
+
+        // 新的开始取代未结束的旧会话：等待中的停止请求等不到结束，先按失败回掉避免悬挂
+        failAllPendingStops(-1, "superseded by new measurement");
+        measureSessionStarting = true;
+
+        DHBleSdk.INSTANCE.controlOpen(1, dataType, new HealthMeasurementCallback() {
+            boolean started = false;
+            @Override public void onStarted() {
+                started = true;
+                measureSessionActive = true;
                 result.success(success());
-                DHBleSdk.INSTANCE.dispose(this);
             }
-            @Override public void onResult(Integer data) {}
-            @Override public void onFail(int errorCode) {
-                result.error(errorCode, "controlHealthData failed");
-                DHBleSdk.INSTANCE.dispose(this);
+            @Override public void onData(HealthRealtimeValue data) {
+                fireRealtimeValue(data);
+            }
+            @Override public void onFinished(HealthMeasurementResult r) {
+                measureSessionStarting = false;
+                measureSessionActive = false;
+                if (!started) {
+                    // 开始失败（ACK 失败/超时）：与旧路径一致只报错误，不发完成事件；
+                    // 等待中的停止请求按成功兑现（已无会话，停止目的视为达成）
+                    result.error(r != null ? r.getErrorCode() : -1, "controlHealthData failed");
+                    resolvePendingStops(true, 0);
+                    return;
+                }
+                boolean ok = r != null && r.isSuccess();
+                int errorCode = r != null ? r.getErrorCode() : -1;
+                JSONObject event = new JSONObject();
+                event.put("isSuccess", ok);
+                event.put("errorCode", errorCode);
+                fireEvent("rwfit:realtimeMeasureComplete", event);
+                // 兑现等待中的停止请求：停止引发的干净结束按成功，超时/失败按错误
+                resolvePendingStops(ok, errorCode);
             }
         });
+    }
 
-        DHBleSdk.INSTANCE.controlHealthDataJL(key, (byte) state);
+    /**
+     * 停止实时测量。会话启动中（ACK 未回）或进行中时，停止请求挂起等会话真正结束
+     * （onFinished）才回复——完成事件也由此发出，停止失败（超时等）以错误回传；
+     * 重复停止共同等待，结束时一起兑现。
+     * 无本插件跟踪的会话（未开始过/引擎重启后状态丢失）按旧语义立即回成功，停止指令照发
+     * 以清理设备侧可能的残留——此时等结束帧只会等来超时。
+     */
+    private void stopRealtimeMeasure(int dataType, final Reply result) {
+        if (measureSessionStarting || measureSessionActive) {
+            synchronized (pendingStopReplies) {
+                pendingStopReplies.add(result);
+            }
+            DHBleSdk.INSTANCE.controlOpen(0, dataType, noopMeasureCallback());
+            return;
+        }
+        DHBleSdk.INSTANCE.controlOpen(0, dataType, noopMeasureCallback());
+        result.success(success());
+    }
+
+    /** 会话结束：按结果兑现所有等待中的停止请求。 */
+    private void resolvePendingStops(boolean ok, int errorCode) {
+        final List<Reply> toReply;
+        synchronized (pendingStopReplies) {
+            toReply = new ArrayList<>(pendingStopReplies);
+            pendingStopReplies.clear();
+        }
+        for (Reply r : toReply) {
+            if (ok) r.success(success());
+            else r.error(errorCode, "controlHealthData stop failed");
+        }
+    }
+
+    private void failAllPendingStops(int code, String msg) {
+        final List<Reply> toReply;
+        synchronized (pendingStopReplies) {
+            toReply = new ArrayList<>(pendingStopReplies);
+            pendingStopReplies.clear();
+        }
+        for (Reply r : toReply) {
+            r.error(code, msg);
+        }
+    }
+
+    private static HealthMeasurementCallback noopMeasureCallback() {
+        return new HealthMeasurementCallback() {
+            @Override public void onStarted() {}
+            @Override public void onData(HealthRealtimeValue data) {}
+            @Override public void onFinished(HealthMeasurementResult r) {}
+        };
+    }
+
+    /** 会话实时值 → rwfit:healthData（payload 形状与旧 HealthDataSyncBean 路径一致）。 */
+    private void fireRealtimeValue(HealthRealtimeValue data) {
+        if (data == null) return;
+        int full = data.getDataType();
+        JSONObject event = new JSONObject();
+        event.put("dataType", dartHealthType(full));
+        event.put("dataValue", data.getValue());
+        if (full == HealthDataType.BLOOD_PRESSURE.getCode()) {
+            event.put("diastolic", data.getExtraValue());
+        }
+        event.put("time", data.getTimestamp());
+        fireEvent("rwfit:healthData", event);
+    }
+
+    /** SDK HealthDataType 全值码（0x0503 等）→ Dart HealthType 小编号。 */
+    private static int dartHealthType(int fullCode) {
+        if (fullCode == HealthDataType.HEART_RATE.getCode()) return 1;
+        if (fullCode == HealthDataType.BLOOD_OXYGEN.getCode()) return 3;
+        if (fullCode == HealthDataType.BLOOD_PRESSURE.getCode()) return 4;
+        if (fullCode == HealthDataType.STRESS.getCode()) return 8;
+        if (fullCode == HealthDataType.BLOOD_SUGAR.getCode()) return 9;
+        if (fullCode == HealthDataType.TEMPERATURE.getCode()) return 11;
+        if (fullCode == HealthDataType.HRV.getCode()) return 13;
+        return fullCode;
+    }
+
+    /** Dart 层 RealtimeMetric 的字符串 key → SDK HealthDataType code。 */
+    private static Integer healthDataTypeCode(String keyName) {
+        switch (keyName != null ? keyName : "") {
+            case "JL_HR_DATA_TRANSFER_KEY": return HealthDataType.HEART_RATE.getCode();
+            case "JL_BO_DATA_TRANSFER_KEY": return HealthDataType.BLOOD_OXYGEN.getCode();
+            case "JL_HRV_DATA_TRANSFER_KEY": return HealthDataType.HRV.getCode();
+            case "JL_PRESSURE_DATA_TRANSFER_KEY": return HealthDataType.STRESS.getCode();
+            case "JL_BLOODSUGAR_DATA_TRANSFER_KEY": return HealthDataType.BLOOD_SUGAR.getCode();
+            case "JL_BP_DATA_TRANSFER_KEY": return HealthDataType.BLOOD_PRESSURE.getCode();
+            case "JL_TEMP_DATA_TRANSFER_KEY": return HealthDataType.TEMPERATURE.getCode();
+            default: return null;
+        }
     }
 
     private void controlFindDevice(final Reply result) {
@@ -906,8 +1039,8 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
 
     // ==================== 全天检测（8 项共用 DrinkReminderBean）====================
 
-    private DrinkReminderBean timedBean(MethodCall call) {
-        DrinkReminderBean bean = new DrinkReminderBean();
+    private HealthMonitorBean timedBean(MethodCall call) {
+        HealthMonitorBean bean = new HealthMonitorBean();
         bean.setOpen(b(call, "isOpen"));
         bean.setRemindDuration(i(call, "duration"));
         // 全天检测协议固定为 00:00–23:59，不透传调用方自定义时段。
@@ -930,142 +1063,46 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
         result.success(r);
     }
 
+    // 全天检测统一走 SDK 3.2.2.2 setHealthMonitor/getHealthMonitor（单槽回调自动释放，
+    // 无需 subscribeData/dispose 配对；指令字节与旧 setTimedXxxJL 系列完全一致——旧方法即本入口的别名）。
     private void getTimed(final Reply result, String type) {
-        switch (type) {
-            case "hr":
-                DHBleSdk.INSTANCE.subscribeData(new TimedHeartRateCallback() {
-                    @Override public void onResult(DrinkReminderBean d) { timedReply(result, d); DHBleSdk.INSTANCE.dispose(this); }
-                    @Override public void onFail(int e) { result.error(e, "getTimed failed"); DHBleSdk.INSTANCE.dispose(this); }
-                    @Override public void onSuccess() {}
-                });
-                DHBleSdk.INSTANCE.getTimedHeartRateJL();
-                break;
-            case "bo":
-                DHBleSdk.INSTANCE.subscribeData(new TimedBloodOxygenCallback() {
-                    @Override public void onResult(DrinkReminderBean d) { timedReply(result, d); DHBleSdk.INSTANCE.dispose(this); }
-                    @Override public void onFail(int e) { result.error(e, "getTimed failed"); DHBleSdk.INSTANCE.dispose(this); }
-                    @Override public void onSuccess() {}
-                });
-                DHBleSdk.INSTANCE.getTimedBloodOxygenJL();
-                break;
-            case "hrv":
-                DHBleSdk.INSTANCE.subscribeData(new TimedHrvCallback() {
-                    @Override public void onResult(DrinkReminderBean d) { timedReply(result, d); DHBleSdk.INSTANCE.dispose(this); }
-                    @Override public void onFail(int e) { result.error(e, "getTimed failed"); DHBleSdk.INSTANCE.dispose(this); }
-                    @Override public void onSuccess() {}
-                });
-                DHBleSdk.INSTANCE.getTimedHRVJL();
-                break;
-            case "stress":
-                DHBleSdk.INSTANCE.subscribeData(new TimedStressCallback() {
-                    @Override public void onResult(DrinkReminderBean d) { timedReply(result, d); DHBleSdk.INSTANCE.dispose(this); }
-                    @Override public void onFail(int e) { result.error(e, "getTimed failed"); DHBleSdk.INSTANCE.dispose(this); }
-                    @Override public void onSuccess() {}
-                });
-                DHBleSdk.INSTANCE.getTimedStressJL();
-                break;
-            case "sugar":
-                DHBleSdk.INSTANCE.subscribeData(new TimedBloodSugarCallback() {
-                    @Override public void onResult(DrinkReminderBean d) { timedReply(result, d); DHBleSdk.INSTANCE.dispose(this); }
-                    @Override public void onFail(int e) { result.error(e, "getTimed failed"); DHBleSdk.INSTANCE.dispose(this); }
-                    @Override public void onSuccess() {}
-                });
-                DHBleSdk.INSTANCE.getTimedBloodSugarJL();
-                break;
-            case "bp":
-                DHBleSdk.INSTANCE.subscribeData(new TimedBloodPressureCallback() {
-                    @Override public void onResult(DrinkReminderBean d) { timedReply(result, d); DHBleSdk.INSTANCE.dispose(this); }
-                    @Override public void onFail(int e) { result.error(e, "getTimed failed"); DHBleSdk.INSTANCE.dispose(this); }
-                    @Override public void onSuccess() {}
-                });
-                DHBleSdk.INSTANCE.getTimedBloodPressureJL();
-                break;
-            case "temp":
-                DHBleSdk.INSTANCE.subscribeData(new TimedBodyTemperatureCallback() {
-                    @Override public void onResult(DrinkReminderBean d) { timedReply(result, d); DHBleSdk.INSTANCE.dispose(this); }
-                    @Override public void onFail(int e) { result.error(e, "getTimed failed"); DHBleSdk.INSTANCE.dispose(this); }
-                    @Override public void onSuccess() {}
-                });
-                DHBleSdk.INSTANCE.getTimedBodyTemperature();
-                break;
-            case "ppg":
-                DHBleSdk.INSTANCE.subscribeData(new TimedPPGCallback() {
-                    @Override public void onResult(DrinkReminderBean d) { timedReply(result, d); DHBleSdk.INSTANCE.dispose(this); }
-                    @Override public void onFail(int e) { result.error(e, "getTimed failed"); DHBleSdk.INSTANCE.dispose(this); }
-                    @Override public void onSuccess() {}
-                });
-                DHBleSdk.INSTANCE.getTimedPPGJL();
-                break;
+        HealthMonitorType t = healthMonitorType(type);
+        if (t == null) {
+            result.error(-1, "unknown type: " + type);
+            return;
         }
+        DHBleSdk.INSTANCE.getHealthMonitor(t, new ReminderSettingCallback() {
+            @Override public void onResult(DrinkReminderBean d) { timedReply(result, d); }
+            @Override public void onFail(int e) { result.error(e, "getTimed failed"); }
+            @Override public void onSuccess() {}
+        });
     }
 
     private void setTimed(MethodCall call, final Reply result, String type) {
-        DrinkReminderBean bean = timedBean(call);
-        switch (type) {
-            case "hr":
-                DHBleSdk.INSTANCE.subscribeData(new TimedHeartRateCallback() {
-                    @Override public void onResult(DrinkReminderBean d) {}
-                    @Override public void onFail(int e) { result.error(e, "setTimed failed"); DHBleSdk.INSTANCE.dispose(this); }
-                    @Override public void onSuccess() { result.success(success()); DHBleSdk.INSTANCE.dispose(this); }
-                });
-                DHBleSdk.INSTANCE.setTimedHeartRateJL(bean);
-                break;
-            case "bo":
-                DHBleSdk.INSTANCE.subscribeData(new TimedBloodOxygenCallback() {
-                    @Override public void onResult(DrinkReminderBean d) {}
-                    @Override public void onFail(int e) { result.error(e, "setTimed failed"); DHBleSdk.INSTANCE.dispose(this); }
-                    @Override public void onSuccess() { result.success(success()); DHBleSdk.INSTANCE.dispose(this); }
-                });
-                DHBleSdk.INSTANCE.setTimedBloodOxygenJL(bean);
-                break;
-            case "hrv":
-                DHBleSdk.INSTANCE.subscribeData(new TimedHrvCallback() {
-                    @Override public void onResult(DrinkReminderBean d) {}
-                    @Override public void onFail(int e) { result.error(e, "setTimed failed"); DHBleSdk.INSTANCE.dispose(this); }
-                    @Override public void onSuccess() { result.success(success()); DHBleSdk.INSTANCE.dispose(this); }
-                });
-                DHBleSdk.INSTANCE.setTimedHRVJL(bean);
-                break;
-            case "stress":
-                DHBleSdk.INSTANCE.subscribeData(new TimedStressCallback() {
-                    @Override public void onResult(DrinkReminderBean d) {}
-                    @Override public void onFail(int e) { result.error(e, "setTimed failed"); DHBleSdk.INSTANCE.dispose(this); }
-                    @Override public void onSuccess() { result.success(success()); DHBleSdk.INSTANCE.dispose(this); }
-                });
-                DHBleSdk.INSTANCE.setTimedStressJL(bean);
-                break;
-            case "sugar":
-                DHBleSdk.INSTANCE.subscribeData(new TimedBloodSugarCallback() {
-                    @Override public void onResult(DrinkReminderBean d) {}
-                    @Override public void onFail(int e) { result.error(e, "setTimed failed"); DHBleSdk.INSTANCE.dispose(this); }
-                    @Override public void onSuccess() { result.success(success()); DHBleSdk.INSTANCE.dispose(this); }
-                });
-                DHBleSdk.INSTANCE.setTimedBloodSugarJL(bean);
-                break;
-            case "bp":
-                DHBleSdk.INSTANCE.subscribeData(new TimedBloodPressureCallback() {
-                    @Override public void onResult(DrinkReminderBean d) {}
-                    @Override public void onFail(int e) { result.error(e, "setTimed failed"); DHBleSdk.INSTANCE.dispose(this); }
-                    @Override public void onSuccess() { result.success(success()); DHBleSdk.INSTANCE.dispose(this); }
-                });
-                DHBleSdk.INSTANCE.setTimedBloodPressureJL(bean);
-                break;
-            case "temp":
-                DHBleSdk.INSTANCE.subscribeData(new TimedBodyTemperatureCallback() {
-                    @Override public void onResult(DrinkReminderBean d) {}
-                    @Override public void onFail(int e) { result.error(e, "setTimed failed"); DHBleSdk.INSTANCE.dispose(this); }
-                    @Override public void onSuccess() { result.success(success()); DHBleSdk.INSTANCE.dispose(this); }
-                });
-                DHBleSdk.INSTANCE.setTimedBodyTemperature(bean);
-                break;
-            case "ppg":
-                DHBleSdk.INSTANCE.subscribeData(new TimedPPGCallback() {
-                    @Override public void onResult(DrinkReminderBean d) {}
-                    @Override public void onFail(int e) { result.error(e, "setTimed failed"); DHBleSdk.INSTANCE.dispose(this); }
-                    @Override public void onSuccess() { result.success(success()); DHBleSdk.INSTANCE.dispose(this); }
-                });
-                DHBleSdk.INSTANCE.setTimedPPGJL(bean);
-                break;
+        HealthMonitorType t = healthMonitorType(type);
+        if (t == null) {
+            result.error(-1, "unknown type: " + type);
+            return;
+        }
+        DHBleSdk.INSTANCE.setHealthMonitor(t, timedBean(call), new ReminderSettingCallback() {
+            @Override public void onResult(DrinkReminderBean d) {}
+            @Override public void onFail(int e) { result.error(e, "setTimed failed"); }
+            @Override public void onSuccess() { result.success(success()); }
+        });
+    }
+
+    /** Dart 层 timed type 字符串 → SDK HealthMonitorType。 */
+    private static HealthMonitorType healthMonitorType(String type) {
+        switch (type != null ? type : "") {
+            case "hr": return HealthMonitorType.HEART_RATE;
+            case "bo": return HealthMonitorType.BLOOD_OXYGEN;
+            case "hrv": return HealthMonitorType.HRV;
+            case "stress": return HealthMonitorType.STRESS;
+            case "sugar": return HealthMonitorType.BLOOD_SUGAR;
+            case "bp": return HealthMonitorType.BLOOD_PRESSURE;
+            case "temp": return HealthMonitorType.BODY_TEMPERATURE;
+            case "ppg": return HealthMonitorType.PPG;
+            default: return null;
         }
     }
 
@@ -1442,36 +1479,31 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
         DHBleSdk.INSTANCE.startFactoryTest(0x15);
     }
 
+    // SDK 2.260922 起 get/setFallDetect 直接携带回调（原无参+subscribeData 重载已删除）
     private void getFallDetect(final Reply result) {
-        DHBleSdk.INSTANCE.subscribeData(new FallDetectCallback() {
+        DHBleSdk.INSTANCE.getFallDetect(new FallDetectCallback() {
             @Override public void onResult(Integer data) {
                 Map<String, Object> response = success();
                 response.put("enabled", data != null && data == 1);
                 result.success(response);
-                DHBleSdk.INSTANCE.dispose(this);
             }
             @Override public void onFail(int errorCode) {
                 result.error(errorCode, "getFallDetect failed");
-                DHBleSdk.INSTANCE.dispose(this);
             }
             @Override public void onSuccess() {}
         });
-        DHBleSdk.INSTANCE.getFallDetect();
     }
 
     private void setFallDetect(MethodCall call, final Reply result) {
-        DHBleSdk.INSTANCE.subscribeData(new FallDetectCallback() {
+        DHBleSdk.INSTANCE.setFallDetect(b(call, "enabled"), new FallDetectCallback() {
             @Override public void onResult(Integer data) {}
             @Override public void onFail(int errorCode) {
                 result.error(errorCode, "setFallDetect failed");
-                DHBleSdk.INSTANCE.dispose(this);
             }
             @Override public void onSuccess() {
                 result.success(success());
-                DHBleSdk.INSTANCE.dispose(this);
             }
         });
-        DHBleSdk.INSTANCE.setFallDetect(b(call, "enabled"));
     }
 
     private void getCountReminderInterval(final Reply result) {
@@ -1634,104 +1666,8 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
         am.dispatchMediaKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, keyCode));
     }
 
-    private JSONObject buildRealtimeDataPayload(HealthDataSyncBean data) {
-        int dataType = data.getDataType();
-        JSONObject event = new JSONObject();
-        event.put("dataType", dataType);
-        switch (dataType) {
-            case 1:
-            case 13: {
-                List<HrPartData> list = data.getHrPartData();
-                if (list == null || list.isEmpty()) return null;
-                HrPartData last = list.get(list.size() - 1);
-                event.put("dataValue", last.getHr());
-                event.put("time", last.getTime());
-                return event;
-            }
-            case 3: {
-                List<BoPartData> list = data.getBoPartData();
-                if (list == null || list.isEmpty()) return null;
-                BoPartData last = list.get(list.size() - 1);
-                event.put("dataValue", last.getBo());
-                event.put("time", last.getTime());
-                return event;
-            }
-            case 4: {
-                List<BpPartData> list = data.getBpPartData();
-                if (list == null || list.isEmpty()) return null;
-                BpPartData last = list.get(list.size() - 1);
-                event.put("dataValue", last.getSp());
-                event.put("diastolic", last.getDp());
-                event.put("time", last.getTime());
-                return event;
-            }
-            case 8: {
-                List<PressurePartData> list = data.getPressurePartData();
-                if (list == null || list.isEmpty()) return null;
-                PressurePartData last = list.get(list.size() - 1);
-                event.put("dataValue", last.getPressure());
-                event.put("time", last.getTime());
-                return event;
-            }
-            case 9: {
-                // Android SDK 将实时血糖协议原始值（实际值 ×10）暂存在
-                // TempPartData；桥接层除以 10，与历史数据及 iOS 统一为实际值。
-                List<TempPartData> list = data.getTempPartData();
-                if (list == null || list.isEmpty()) return null;
-                TempPartData last = list.get(list.size() - 1);
-                event.put("dataValue", last.getTemp() / 10.0);
-                event.put("time", last.getTime());
-                return event;
-            }
-            case 10: {
-                MuslimCountItemBean item = data.getMuslimCountPartData();
-                if (item == null) return null;
-                event.put("dataValue", item.getCount());
-                event.put("time", item.getTimeMills());
-                return event;
-            }
-            case 11: {
-                List<TempPartData> list = data.getTempPartData();
-                if (list == null || list.isEmpty()) return null;
-                TempPartData last = list.get(list.size() - 1);
-                event.put("dataValue", last.getTemp() / 10.0);
-                event.put("time", last.getTime());
-                return event;
-            }
-            default:
-                return null;
-        }
-    }
 
     private void registerPersistentCallbacks() {
-        // HealthDataBroCallback 同时承载支持手动测量的健康数据，
-        // 以及设备主动上报的赞念计数（赞念计数本身不下发测量命令）。
-        if (realtimeDataCallback == null) {
-            realtimeDataCallback = new HealthDataBroCallback() {
-                @Override public void onResult(HealthDataSyncBean data) {
-                    if (data == null) return;
-                    JSONObject eventData = buildRealtimeDataPayload(data);
-                    if (eventData != null) fireEvent("rwfit:healthData", eventData);
-                }
-                @Override public void onFail(int errorCode) {}
-                @Override public void onSuccess() {}
-            };
-            DHBleSdk.INSTANCE.subscribeData(realtimeDataCallback);
-        }
-
-        if (realtimeMeasureStateCallback == null) {
-            realtimeMeasureStateCallback = new HealthDataControlCallback() {
-                @Override public void onResult(Integer data) {
-                    if (data != null && data >= 10) {
-                        fireEvent("rwfit:realtimeMeasureComplete", new JSONObject());
-                    }
-                }
-                @Override public void onFail(int errorCode) {}
-                @Override public void onSuccess() {}
-            };
-            DHBleSdk.INSTANCE.subscribeData(realtimeMeasureStateCallback);
-        }
-
         if (callControlEventCallback == null) {
             callControlEventCallback = new CallRemindCallback() {
                 @Override public void onResult(Integer data) {
@@ -1770,20 +1706,33 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
             DHBleSdk.INSTANCE.subscribeData(healthAlertEventCallback);
         }
 
-        if (touchEventCallback == null) {
-            touchEventCallback = new TouchEventCallback() {
-                @Override public void onResult(int[] data) {
-                    if (data == null || data.length < 2) return;
-                    JSONObject event = new JSONObject();
-                    event.put("keyType", data[0]);
-                    event.put("touchType", data[1]);
-                    event.put("action", touchAction(data[0], data[1]));
-                    fireEvent("rwfit:touchEvent", event);
+        if (devicePushListener == null) {
+            devicePushListener = new OnDevicePushListener() {
+                @Override public void onPush(PushData data) {
+                    if (data == null) return;
+                    if (data.getType() == DevicePushType.TOUCH_EVENT) {
+                        if (!(data.getValue() instanceof TouchEventBean)) return;
+                        TouchEventBean bean = (TouchEventBean) data.getValue();
+                        JSONObject event = new JSONObject();
+                        event.put("keyType", bean.getKeyType());
+                        event.put("touchType", bean.getTouchType());
+                        event.put("action", touchAction(bean.getKeyType(), bean.getTouchType()));
+                        fireEvent("rwfit:touchEvent", event);
+                        return;
+                    }
+                    if (data.getType() == DevicePushType.MUSLIM_COUNT) {
+                        // 赞念计数实时推送（原 HealthDataSyncBean 路径已移除，统一走 0x21 推送）
+                        if (!(data.getValue() instanceof MuslimCountItemBean)) return;
+                        MuslimCountItemBean item = (MuslimCountItemBean) data.getValue();
+                        JSONObject event = new JSONObject();
+                        event.put("dataType", 10);
+                        event.put("dataValue", item.getCount());
+                        event.put("time", item.getTimeMills());
+                        fireEvent("rwfit:healthData", event);
+                    }
                 }
-                @Override public void onFail(int errorCode) {}
-                @Override public void onSuccess() {}
             };
-            DHBleSdk.INSTANCE.subscribeData(touchEventCallback);
+            DHBleSdk.INSTANCE.addOnDevicePushListener(devicePushListener);
         }
 
         if (factoryTestCallback == null) {
@@ -1829,13 +1778,11 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
     }
 
     private void disposePersistentCallbacks() {
-        if (realtimeDataCallback != null) {
-            DHBleSdk.INSTANCE.dispose(realtimeDataCallback);
-            realtimeDataCallback = null;
-        }
-        if (realtimeMeasureStateCallback != null) {
-            DHBleSdk.INSTANCE.dispose(realtimeMeasureStateCallback);
-            realtimeMeasureStateCallback = null;
+        // 引擎拆除：会话状态复位；挂起的停止请求不再回复（Dart 侧已随引擎销毁）
+        measureSessionStarting = false;
+        measureSessionActive = false;
+        synchronized (pendingStopReplies) {
+            pendingStopReplies.clear();
         }
         if (workoutRealtimeCallback != null) {
             DHBleSdk.INSTANCE.dispose(workoutRealtimeCallback);
@@ -1857,9 +1804,9 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
             DHBleSdk.INSTANCE.dispose(healthAlertEventCallback);
             healthAlertEventCallback = null;
         }
-        if (touchEventCallback != null) {
-            DHBleSdk.INSTANCE.dispose(touchEventCallback);
-            touchEventCallback = null;
+        if (devicePushListener != null) {
+            DHBleSdk.INSTANCE.removeOnDevicePushListener(devicePushListener);
+            devicePushListener = null;
         }
         if (factoryTestCallback != null) {
             DHBleSdk.INSTANCE.dispose(factoryTestCallback);

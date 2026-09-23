@@ -21,7 +21,7 @@
 
 - Dart SDK `^3.12.0`、Flutter `>=3.3.0`
 - Android minSdk **24**（Android 7.0 及以上）、compileSdk 35
-- iOS **12.0+**；支持模拟器构建和运行，蓝牙功能需使用真机测试
+- iOS **15.0+**（随 260922 版 SDK 提升）；支持模拟器构建和运行，蓝牙功能需使用真机测试
 
 ### 1.2 相关术语
 
@@ -78,7 +78,7 @@ flutter pub get          # 升级版本改 ref 后：flutter pub upgrade rwfit_b
 
 `android/app/build.gradle.kts`：`minSdk = 24`
 
-> ⚠️ **必需：注册插件内置的原生 SDK 仓库**。`pub get` 成功 ≠ 能构建。插件随包内置了 RW 戒指原生 SDK 的 AAR（`com.rwfit:blesdk-rwfit`），位于插件目录的 `android/repo`。**Gradle 解析 `:app` 的传递依赖时用的是 App 自己的仓库列表，插件内部声明的仓库不会传递过来**，所以必须在 **App 侧**把插件目录下的 `repo` 注册为本地 maven 仓库，否则构建报 `Could not find com.rwfit:blesdk-rwfit:2.260920`。详见「第 2 步：平台配置」。
+> ⚠️ **必需：注册插件内置的原生 SDK 仓库**。`pub get` 成功 ≠ 能构建。插件随包内置了 RW 戒指原生 SDK 的 AAR（`com.rwfit:blesdk-rwfit`），位于插件目录的 `android/repo`。**Gradle 解析 `:app` 的传递依赖时用的是 App 自己的仓库列表，插件内部声明的仓库不会传递过来**，所以必须在 **App 侧**把插件目录下的 `repo` 注册为本地 maven 仓库，否则构建报 `Could not find com.rwfit:blesdk-rwfit:2.260922`。详见「第 2 步：平台配置」。
 
 在你的 App 根目录 `android/build.gradle.kts` 的 `allprojects.repositories` 中加一行（Kotlin DSL）：
 
@@ -694,7 +694,7 @@ iOS 音乐控制由系统处理。
 | `startRealtimeMeasure(RealtimeMetric m)` | `m`：测量项枚举 | `Future<void>` | 开启实时测量 |
 | `stopRealtimeMeasure(RealtimeMetric m)` | `m`：测量项枚举 | `Future<void>` | 停止实时测量 |
 | `onRealtimeData` | — | `Stream<RealtimeData>` | 实时数据回调 |
-| `onRealtimeMeasureComplete` | — | `Stream<void>` | 单次测量完成回调 |
+| `onRealtimeMeasureComplete` | — | `Stream<RealtimeMeasureResult>` | 单次测量完成回调；`isSuccess=false` 表示失败/超时（Android，`errorCode` 为 SDK 错误码，超时为 6；iOS 恒为成功） |
 
 > ⚠️ **互斥约束**：同一时间只能开启一种测量类型，切换前必须先 `stop` 当前类型。
 

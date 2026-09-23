@@ -42,11 +42,14 @@ class _HealthHistoryPageState extends State<HealthHistoryPage> {
     setState(() => _busy = true);
     try {
       if (_measuring) {
+        // 停止：完成事件监听器可能已把 _measuring 置 false（桥接先发事件再兑现停止请求），
+        // 这里显式置 false，不要对异步回调可能已修改的状态取反。
         await widget.controller.ring.stopRealtimeMeasure(metric);
+        if (mounted) setState(() => _measuring = false);
       } else {
         await widget.controller.ring.startRealtimeMeasure(metric);
+        if (mounted) setState(() => _measuring = true);
       }
-      if (mounted) setState(() => _measuring = !_measuring);
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(

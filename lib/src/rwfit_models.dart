@@ -114,6 +114,25 @@ class WorkoutState {
 }
 
 /// 实时健康数据。原生桥接统一传 Unix 秒，对外规范字段为 [timestampSec]。
+/// 单次实时测量结束结果。
+///
+/// Android 端携带 [isSuccess] 与 [errorCode]：失败或 70 秒超时时 `isSuccess=false`
+/// （超时 `errorCode=6`）。iOS 端完成通知不区分成功失败，字段缺省按成功处理。
+class RealtimeMeasureResult {
+  const RealtimeMeasureResult({required this.isSuccess, this.errorCode = 0});
+
+  final bool isSuccess;
+
+  /// SDK 错误码；[isSuccess] 为 true 时无意义（保持 0）。
+  final int errorCode;
+
+  factory RealtimeMeasureResult.fromMap(Map<dynamic, dynamic> m) =>
+      RealtimeMeasureResult(
+        isSuccess: m['isSuccess'] == null ? true : m['isSuccess'] == true,
+        errorCode: (m['errorCode'] as num?)?.toInt() ?? 0,
+      );
+}
+
 class RealtimeData {
   /// 兼容旧代码使用毫秒构造；新代码应使用 [RealtimeData.fromSeconds]。
   @Deprecated('Use RealtimeData.fromSeconds instead.')

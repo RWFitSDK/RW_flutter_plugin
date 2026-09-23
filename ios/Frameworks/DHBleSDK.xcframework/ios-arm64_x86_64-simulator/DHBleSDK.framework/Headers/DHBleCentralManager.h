@@ -31,6 +31,9 @@ NS_ASSUME_NONNULL_BEGIN
 
 /// 开始搜索 注意:如果设备未解绑,即使搜索到设备也不调用代理返回设备列表
 + (void)startScan;
+/// 开始搜索并按客户代码过滤
+/// @param customerCode nil表示不过滤；0x00返回旧格式和协议v1公版设备；0x01-0xFE仅返回协议v1且客户代码一致的设备
++ (void)startScanWithCustomerCode:(nullable NSNumber *)customerCode;
 /// 停止搜索
 + (void)stopScan;
 
@@ -64,6 +67,10 @@ NS_ASSUME_NONNULL_BEGIN
 + (void)setLogStatus:(BOOL)isLog;
 ///是否为Telink平台设备
 + (BOOL)isTelinkDevice;
+///是否为带中科OTA服务(FF12)的设备
++ (BOOL)isZkOtaDevice;
+///是否为带Nordic DFU服务的设备
++ (BOOL)isNordicOtaDevice;
 
 /// 蓝牙连接代理
 @property (nonatomic, weak) id<DHBleConnectDelegate> connectDelegate;
