@@ -2,19 +2,6 @@
 
 ---
 
-## Contents
-
-- [1. Introduction](#1-introduction)
-- [2. Quick Start](#2-quick-start)
-- [3. API Reference](#3-api-reference)
-  - [3.1 Device Scanning, Connection, Binding, and Reconnection](#31-device-scanning-connection-binding-and-reconnection)
-  - [3.2 Device Operations](#32-device-operations)
-- [4. Appendix](#4-appendix)
-- [Flutter Plugin Revision History](#flutter-plugin-revision-history)
-- [Contact and Technical Support](#contact-and-technical-support)
-
----
-
 ## 1. Introduction
 
 ### 1.1 Supported Platforms and Languages
@@ -36,7 +23,6 @@
 1. Use this plugin together with the `example/` project where possible. For a basic integration, focus on the scan page and device page.
 2. All request/response methods return a `Future` and throw `RwfitException(code, message)` on failure. Events are typed `Stream`s; call `cancel()` in the page's `dispose` to avoid duplicate events.
 3. **iOS simulator builds and execution are supported**, but a simulator cannot scan for or connect to physical Bluetooth devices. Use a physical device to test BLE features.
-4. **Delivery is a GitHub repository plus a git dependency**. [`RWFitSDK/RW_flutter_plugin`](https://github.com/RWFitSDK/RW_flutter_plugin) includes `example/`, the bundled native SDKs (Android AAR in `android/repo/` and a vendored iOS `DHBleSDK.xcframework`), and Dart source. Pin a tag in the app's git dependency; no separate SDK files are required.
 
 ---
 
@@ -61,7 +47,7 @@ dependencies:
   rwfit_ble:
     git:
       url: https://github.com/RWFitSDK/RW_flutter_plugin.git
-      ref: v0.0.8   # Pin the version; change this when upgrading
+      ref: v0.0.9   # Pin the version; change this when upgrading
   # Used by the permission example below. You may use the app's existing
   # permission-management solution instead.
   permission_handler: ^12.0.2
@@ -263,7 +249,7 @@ await ring.startScan();
 | `isBrightScreenSleepTime` | `bool` | Sleep-mode screen schedule support |
 | `isBrightScreenTime` | `bool` | Screen-on duration support |
 | `isSupportWorkout` | `bool` | Multi-sport support |
-| `isRememberSwitch` | `bool` | Muslim count switch support |
+| `isRememberSwitch` | `bool` | Dhikr count (Tasbih counter) switch support |
 | `isSupportHrReminder` | `bool` | Heart-rate alert support |
 | `isSupportBoReminder` | `bool` | SpO2 alert support |
 | `isSupportMotoVibrationLevel` | `bool` | Motor vibration-level support |
@@ -277,7 +263,7 @@ await ring.startScan();
 | `isHrv` | `bool` | HRV support |
 | `isPressure` | `bool` | Stress support |
 | `isBloodSugar` | `bool` | Blood-sugar support |
-| `isMuslimCountData` | `bool` | Muslim count data support |
+| `isMuslimCountData` | `bool` | Dhikr count data support |
 | `isBodyTemp` | `bool` | Body-temperature data support |
 | `isSupportMuslimTimeDisplayMode` | `bool` | Muslim time-display mode support |
 | `isSupportSensorRawPPG` | `bool` | Raw PPG support |
@@ -290,6 +276,8 @@ await ring.startScan();
 | `isSupportSensorRawSleep` | `bool` | Real-time sleep data support |
 | `isSupportFallDetect` | `bool` | Fall-alert support |
 | `isSupportRecording` | `bool` | Recording support |
+| `isSupportSedentary` | `bool` | Sedentary-reminder support |
+| `isDrink` | `bool` | Drink-reminder support |
 | `isFindDevice` | `bool` | Find-device support |
 | `isTakePhoto` | `bool` | Remote-camera support |
 | `isLedLight` | `bool` | LED brightness support |
@@ -357,9 +345,17 @@ await ring.startScan();
 
 ##### 3.2.1.4 Get Battery Level
 
-| Method | Parameters | Returns | Description |
+| Method / Stream | Parameters | Returns | Description |
 |--------|------------|---------|-------------|
-| `getPower()` | None | `Future<int>` | Battery percentage, 0–100 |
+| `getPower()` | None | `Future<int>` | Active query, battery percentage 0–100 |
+| `onBatteryChanged` | — | `Stream<BatteryInfo>` | Battery-change push, supported on both platforms |
+
+**`BatteryInfo` fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `power` | `int` | Battery percentage 0–100 |
+| `charging` | `bool` | Whether charging; depends on device firmware — always `false` when not reported by old firmware |
 
 ##### 3.2.1.5 Get and Set Video Control
 
@@ -553,14 +549,14 @@ On Android, connect the device and call `setVideoHid(3)` to select Music mode. A
 
 iOS music control is handled by the system.
 
-##### 3.2.1.15 Get and Set the Muslim Count Switch
+##### 3.2.1.15 Get and Set the Dhikr Count Switch
 
-Use this API only when `isRememberSwitch == true`. It enables or disables the Muslim count feature on the device.
+Use this API only when `isRememberSwitch == true`. It enables or disables the Dhikr count feature on the device.
 
 | Method | Parameters | Returns | Description |
 |--------|------------|---------|-------------|
-| `getMuslimCountEnabled()` | None | `Future<bool>` | Get the Muslim count switch |
-| `setMuslimCountEnabled(bool enabled)` | Enable state | `Future<void>` | Set the Muslim count switch |
+| `getMuslimCountEnabled()` | None | `Future<bool>` | Get the Dhikr count switch |
+| `setMuslimCountEnabled(bool enabled)` | Enable state | `Future<void>` | Set the Dhikr count switch |
 
 ##### 3.2.1.16 Get and Set Heart-Rate/Blood-Oxygen Alerts
 
@@ -682,6 +678,56 @@ When enabled, detected falls are emitted through `onTouchEvent` with `action == 
 | `getCountReminderInterval()` | None | `Future<int>` | Get the reminder interval in minutes |
 | `setCountReminderInterval(int intervalMinutes)` | 0, 30, 60, 90, or 120 | `Future<void>` | 0=off; other values are the interval |
 
+##### 3.2.1.29 Sedentary Reminder
+
+> Capability bit: `isSupportSedentary` (`FunctionMenu.isSupportSedentary`). Only usable on devices that support it.
+>
+> Mirrors native SDK doc §3.2.1.29; identical semantics on both platforms.
+>
+> Within the configured period, the device vibrates when it detects continuous sedentary time exceeding the reminder interval.
+
+| Method | Parameters | Returns | Description |
+|--------|------------|---------|-------------|
+| `getSedentaryReminder()` | None | `Future<ReminderConfig>` | Query current configuration |
+| `setSedentaryReminder(ReminderConfig config)` | See below | `Future<void>` | Set switch, period, and interval |
+
+**`ReminderConfig` fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `isOpen` | `bool` | Reminder switch |
+| `startHour` / `startMin` | `int` | Period start, 0–23 / 0–59 |
+| `endHour` / `endMin` | `int` | Period end, 0–23 / 0–59 |
+| `intervalMinutes` | `int` | Reminder interval in minutes |
+
+```dart
+// Enable, 09:00–18:00, remind after 60 minutes of continuous inactivity
+await ring.setSedentaryReminder(ReminderConfig(
+  isOpen: true,
+  startHour: 9, startMin: 0,
+  endHour: 18, endMin: 0,
+  intervalMinutes: 60,
+));
+```
+
+##### 3.2.1.30 Hydration Reminder
+
+> Capability bit: `isDrink` (`FunctionMenu.isDrink`). Only usable on devices that support it.
+>
+> Mirrors native SDK doc §3.2.1.30. Within the configured period, the device vibrates periodically at the reminder interval.
+
+Methods: `getDrinkReminder()` / `setDrinkReminder(ReminderConfig config)`. `ReminderConfig` is shared with 3.2.1.29 (`isOpen` is the drink-reminder switch, `intervalMinutes` the trigger interval).
+
+```dart
+// Enable, 08:00–22:00, every 30 minutes
+await ring.setDrinkReminder(ReminderConfig(
+  isOpen: true,
+  startHour: 8, startMin: 0,
+  endHour: 22, endMin: 0,
+  intervalMinutes: 30,
+));
+```
+
 #### 3.2.2 Health Data: Real-Time Measurement and All-Day Monitoring
 
 ##### 3.2.2.1 Start and Stop Real-Time Health Measurement
@@ -739,7 +785,7 @@ Celsius, for example `36.5`.
 | `HealthType.bloodBp` | 4 | Blood pressure |
 | `HealthType.pressure` | 8 | Stress |
 | `HealthType.bloodSugar` | 9 | Blood sugar |
-| `HealthType.muslimCount` | 10 | Real-time Muslim count |
+| `HealthType.muslimCount` | 10 | Real-time Dhikr count |
 | `HealthType.temperature` | 11 | Real-time body temperature (°C) |
 | `HealthType.hrv` | 13 | HRV |
 
@@ -829,11 +875,11 @@ Use `copyWith(...)` to change the switch or interval while retaining other field
 | `pressure` | `time`, `date`, `items[{time,pressure}]` | Stress |
 | `bloodSugar` | `time`, `date`, `items[{time,bloodSugar}]` | Blood sugar |
 | `temp` | `time`, `date`, `items[{time,temp}]` | Body temperature |
-| `muslimCount` | `time`, `date`, `totalCount`, `items[{time,count}]` | Muslim count |
+| `muslimCount` | `time`, `date`, `totalCount`, `items[{time,count}]` | Dhikr count |
 
 ###### 3.2.2.4.2 Standard Measurement Details
 
-Except for step, sleep, and Muslim count data, measurement types are grouped by date and contain `time`, `date`, and `items`. Values and units are:
+Except for step, sleep, and Dhikr count data, measurement types are grouped by date and contain `time`, `date`, and `items`. Values and units are:
 
 | Data | Value fields | Unit / Conversion |
 |------|--------------|-------------------|
@@ -875,7 +921,7 @@ Historical `sleepType`: 0=awake, 1=light sleep, 2=deep sleep, 3=REM.
 
 > These values differ from the raw real-time sleep protocol in 3.2.5.3, where 1=deep, 2=light, 3=awake, and 4=REM. Do not mix the protocols.
 
-###### 3.2.2.4.5 Muslim Count Data
+###### 3.2.2.4.5 Dhikr Count Data
 
 Each `muslimCount` date object contains:
 
@@ -1043,7 +1089,7 @@ Enable this feature only when `FunctionMenu.supportsWorkout == true`. Query devi
 
 | Method / Stream | Parameters | Returns | Description |
 |-----------------|------------|---------|-------------|
-| `setWorkoutRealtimeEnabled(bool enabled)` | Enable state | `Future<void>` | Enable on workout-page entry and disable on exit |
+| `setWorkoutRealtimeEnabled(bool enabled)` | Enable state | `Future<void>` | Enable on workout-page entry and disable on exit; a successful call means the device has confirmed the change; failures throw `RwfitException` |
 | `onWorkoutRealtimeData` | — | `Stream<WorkoutRealtimeData>` | Real-time workout statistics |
 
 After connecting the device, subscribe to `onWorkoutRealtimeData`, then call `setWorkoutRealtimeEnabled(true)` to enable real-time data. When leaving the workout page, call `setWorkoutRealtimeEnabled(false)` and cancel the subscription.
@@ -1073,6 +1119,12 @@ After connecting the device, subscribe to `onWorkoutRealtimeData`, then call `se
 | Method | Parameters | Returns | Description |
 |--------|------------|---------|-------------|
 | `getWorkoutReports()` | None | `Future<List<WorkoutReport>>` | Synchronize saved workout reports |
+
+> [!IMPORTANT]
+> Workout reports are **deleted from the device after being read**: each successful fetch clears
+> that batch, so persist the data yourself; subsequent fetches return an empty list. An empty list
+> (not an error) is also returned when the device has no stored reports or an occasional malformed
+> frame occurs.
 
 **`WorkoutReport` fields:**
 
@@ -1192,6 +1244,161 @@ On devices that support this feature, sleep packets are pushed automatically thr
 
 This is the raw real-time sleep protocol and differs from historical `sleepType` in 3.2.2.4.4.
 
+#### 3.2.6 Recording
+
+Recording control, status queries, and recording file management for smart recording rings.
+Requires a device with a built-in microphone — check `FunctionMenu.isSupportRecording` first
+and do not call these APIs when unsupported.
+
+##### 3.2.6.1 Start/Stop Recording
+
+> Controls the device to start or stop recording; the device stores the recording locally.
+
+Method: `Future<int> recordControl(bool start)` — `start` true starts, false stops. The returned
+value is the resulting status: 0x01 recording, 0x00 idle.
+
+```dart
+final status = await ring.recordControl(true); // 0x01 = recording started
+```
+
+##### 3.2.6.2 Query Recording Status
+
+> Queries whether the device is currently recording plus the recording-storage capacity;
+> recommended to query once after connecting. Active queries use `getRecordStatus()`; status
+> changes made on the device side arrive via the `onRecordStatus` push (both platforms).
+
+Method: `Future<RecordStatus> getRecordStatus()` · Stream: `Stream<RecordStatus> get onRecordStatus`
+
+**`RecordStatus` fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `status` | `int` | 0x01 recording; 0x00 idle |
+| `recording` | `bool` | Whether currently recording |
+| `startTime` | `int` | Start timestamp of the current recording, **seconds**; only present while recording |
+| `duration` | `int` | Elapsed recording time, **seconds**; only present while recording |
+| `totalCapacity` | `int` | Total recording-storage capacity, **bytes** |
+| `remainingCapacity` | `int` | Remaining recording-storage capacity, **bytes** |
+
+```dart
+final status = await ring.getRecordStatus();
+if (status.recording) {
+  debugPrint('recording, ${status.duration}s elapsed, '
+      '${status.remainingCapacity}/${status.totalCapacity} B left');
+}
+```
+
+##### 3.2.6.3 Get the Recording File List
+
+Method: `Future<List<RecordFileItem>> getRecordFileList()` — metadata of all recordings on the
+device, returned as one complete list.
+
+**`RecordFileItem` fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `fileId` | `int` | File ID, used for download (3.2.6.4) and delete (3.2.6.6) |
+| `fileSize` | `int` | File size on the device, **bytes** |
+| `duration` | `int` | Recording duration, **seconds** |
+| `timestamp` | `int` | Recording time, Unix timestamp in **seconds** |
+
+```dart
+final files = await ring.getRecordFileList();
+for (final f in files) {
+  debugPrint('fileId=${f.fileId} ${f.duration}s ${f.fileSize}B');
+}
+```
+
+##### 3.2.6.4 Download a Recording File
+
+> Downloads one recording by file ID. Transfers are sequential — **no resume support; a failed
+> transfer must restart from the beginning**. After completion the file is converted to a
+> standard Ogg Opus (.opus) file, saved locally, and its absolute path returned.
+
+Method: `Future<String> transferRecordFile(int fileId)` — `fileId` comes from
+`getRecordFileList()`.
+Progress and failures: `Stream<RecordFileTransfer> get onRecordTransfer`.
+
+**`RecordFileTransfer` fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `fileType` | `int` | 0x01: recording |
+| `duration` | `int` | Recording duration, seconds |
+| `timestamp` | `int` | Recording time, Unix timestamp in seconds |
+| `fileId` | `int` | File ID |
+| `format` | `int` | 0x02: OPUS |
+| `fileSize` | `int` | Total file size, **device-side raw bytes** (not the local Ogg file size) |
+| `received` | `int` | Bytes received so far, same device-raw unit |
+| `progress` | `double` | Transfer progress 0–1 |
+| `complete` | `bool` | Whether the transfer finished |
+| `completedAt` | `int` | Completion timestamp, seconds |
+| `filePath` | `String?` | Local Ogg Opus file path when `complete == true` |
+| `errorCode` | `int?` | Error code on failure; null otherwise |
+
+```dart
+final sub = ring.onRecordTransfer.listen((e) {
+  debugPrint('download ${e.fileId}: ${(e.progress * 100).toStringAsFixed(0)}%');
+  if (e.errorCode != null) debugPrint('download failed: ${e.errorCode}');
+});
+final path = await ring.transferRecordFile(fileId); // returns the local .opus path
+```
+
+Downloaded files are saved automatically into an app-specific Recording directory (Android:
+`getExternalFilesDir(DOWNLOADS)/Recording`; iOS: `Documents/Recording`) named
+`{fileId}_{duration}_{downloadAt}.opus`.
+
+##### 3.2.6.5 Get the Local Recording List
+
+Method: `Future<List<LocalRecordFile>> getLocalRecordFileList()` — recordings already downloaded
+to the device, newest first.
+
+**`LocalRecordFile` fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | `String` | File name, format `{fileId}_{duration}_{downloadAt}.opus` |
+| `path` | `String` | Absolute file path |
+| `fileSize` | `int` | Local file size, bytes (the converted Ogg file) |
+| `lastModified` | `int` | Last-modified time, **milliseconds** |
+| `fileId` | `int?` | File ID parsed from the name; null when parsing fails |
+| `duration` | `int?` | Duration in seconds parsed from the name; null when parsing fails |
+
+```dart
+final local = await ring.getLocalRecordFileList();
+```
+
+##### 3.2.6.6 Delete a Recording File
+
+Method: `Future<int> deleteRecordFile(int fileId)` — deletes one recording from the device.
+Return code 0x00 = success, anything else = failure.
+
+```dart
+final result = await ring.deleteRecordFile(fileId); // 0x00 = success
+```
+
+##### 3.2.6.7 Format the Recording Storage
+
+Method: `Future<int> formatRecordStorage()` — erases ALL device recordings. **Irreversible;
+ask the user to confirm before formatting.** Return code 0x00 = success.
+
+```dart
+// Call only after the user confirms in the UI
+final result = await ring.formatRecordStorage();
+```
+
+##### 3.2.6.8 Playback Pre-conversion
+
+Method: `Future<String> convertOggToWav(String path)` — `path` is a local .opus file. On iOS it
+converts Ogg Opus to 16-bit PCM WAV (AVFoundation does not accept the Ogg container) and returns
+the new path (cached under Caches/ring_wav; the same file is not converted twice); Android's
+MediaPlayer plays Ogg Opus natively and the input path is returned unchanged.
+
+```dart
+final playable = await ring.convertOggToWav(path);
+// iOS: play playable (.wav); Android: play the original path (.opus)
+```
+
 ---
 
 ## 4. Appendix
@@ -1302,6 +1509,14 @@ Future<void> connectAndRead() async {
 ---
 
 ## Flutter Plugin Revision History
+
+**v0.0.9_20260922** (2026.09.22)
+
+- Fixed `getWorkoutReports()` returning error 201 when the device has no stored workout reports; an empty list is now returned, matching iOS behavior
+- Added recording: recording control, status query and real-time push, file list and download (progress events, local Ogg Opus saving after download), local recording list, delete, format, and Ogg-to-WAV conversion for iOS playback
+- Added sedentary reminder get/set (3.2.1.29)
+- Added hydration reminder get/set (3.2.1.30)
+- Upgraded native SDKs to the 260922 release (Android `RW_SDK_V2_20260922`, iOS `RW_SDK_V2_260922`); minimum iOS requirement raised to iOS 15
 
 **v0.0.8_20260920** (2026.09.20)
 

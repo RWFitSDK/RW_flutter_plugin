@@ -65,4 +65,7 @@ abstract final class RwfitEvents {
   static const heartRateCalibration = 'rwfit:heartRateCalibration';
   static const sensorRawData = 'rwfit:sensorRawData';
   static const sensorRawStopped = 'rwfit:sensorRawStopped';
+  static const recordStatus = 'rwfit:recordStatus';
+  static const recordTransfer = 'rwfit:recordTransfer';
+  static const batteryChanged = 'rwfit:batteryChanged';
 }

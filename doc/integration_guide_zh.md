@@ -2,19 +2,6 @@
 
 ---
 
-## 目录
-
-- [1. 简介](#1-简介)
-- [2. 快速开始](#2-快速开始quick-start)
-- [3. 接口说明](#3-接口说明api-reference)
-  - [3.1 设备搜索、连接、绑定与重连](#31-设备搜索连接绑定与重连)
-  - [3.2 设备功能操作](#32-设备功能操作)
-- [4. 附录](#4-附录)
-- [Flutter 插件修订记录](#flutter-插件修订记录)
-- [联系方式与技术支持](#联系方式与技术支持)
-
----
-
 ## 1. 简介
 
 ### 1.1 适用平台与语言
@@ -36,7 +23,6 @@
 1. 使用此插件最好结合示例工程 `example/`；参考例子只需关注扫描页与设备页两个页面代码即可。
 2. 所有请求-响应方法返回 `Future`，失败抛 `RwfitException(code, message)`；事件流为 typed `Stream`，页面 `dispose` 时须 `cancel()`，避免事件叠加。
 3. **iOS 支持模拟器构建和运行**，但模拟器无法扫描或连接真实蓝牙设备；蓝牙功能请使用真机测试。
-4. **交付形式为 GitHub 仓库 + git 依赖**：仓库 [`RWFitSDK/RW_flutter_plugin`](https://github.com/RWFitSDK/RW_flutter_plugin) 含 `example/`、内置原生 SDK（Android AAR 在 `android/repo/`，iOS `DHBleSDK.xcframework` 已 vendored）、Dart 源码。App 通过 git 依赖引入，用 tag 锁版本，无需额外 SDK 文件。
 
 ---
 
@@ -61,7 +47,7 @@ dependencies:
   rwfit_ble:
     git:
       url: https://github.com/RWFitSDK/RW_flutter_plugin.git
-      ref: v0.0.8   # 锁定版本，升级时改这里
+      ref: v0.0.9   # 锁定版本，升级时改这里
   # 下方权限申请示例使用；也可替换为 App 现有的权限管理方案
   permission_handler: ^12.0.2
 ```
@@ -288,6 +274,8 @@ await ring.startScan();
 | `isSupportSensorRawSleep` | `bool` | 是否支持睡眠实时数据 |
 | `isSupportFallDetect` | `bool` | 是否支持跌落提醒 |
 | `isSupportRecording` | `bool` | 是否支持录音 |
+| `isSupportSedentary` | `bool` | 是否支持久坐提醒设置 |
+| `isDrink` | `bool` | 是否支持喝水提醒设置 |
 | `isFindDevice` | `bool` | 是否支持查找设备 |
 | `isTakePhoto` | `bool` | 是否支持遥控拍照 |
 | `isLedLight` | `bool` | 是否支持 LED 亮度设置 |
@@ -355,9 +343,17 @@ await ring.startScan();
 
 ##### 3.2.1.4 获取电量
 
-| 方法 | 参数 | 返回 | 说明 |
+| 方法 / Stream | 参数 | 返回 | 说明 |
 |------|------|------|------|
-| `getPower()` | 无 | `Future<int>` 电量百分比 0–100 | |
+| `getPower()` | 无 | `Future<int>` | 主动查询，电量百分比 0–100 |
+| `onBatteryChanged` | — | `Stream<BatteryInfo>` | 电量变化主动推送，两端均支持 |
+
+**`BatteryInfo` 字段：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `power` | `int` | 电量百分比 0–100 |
+| `charging` | `bool` | 是否正在充电；充电状态依赖设备固件，旧固件未返回时恒为 `false` |
 
 ##### 3.2.1.5 获取与设置视频控制开关
 
@@ -644,6 +640,8 @@ iOS 音乐控制由系统处理。
 
 **`TouchAction` 枚举值：** `singleTap`, `doubleTap`, `tripleTap`, `longPress`, `swing`, `fallDetected`, `cameraTakePicture`, `musicPlay`, `musicPause`, `musicPrev`, `musicNext`, `musicVolumeUp`, `musicVolumeDown`, `unknown`
 
+> **跌落事件**：`keyType == 2` 时为跌倒检测上报，`action == TouchAction.fallDetected`（跌落时 `touchType` 默认为 1）。需先开启 [3.2.1.24 跌落提醒设置](#3124-跌落提醒设置)，设备检测到跌落时才会经本通道上报；两端行为一致。
+
 > 拍照动作两端均支持；音乐控制依赖平台系统能力，仅 Android 支持。
 
 ##### 3.2.1.22 震动间隔时长设置与获取
@@ -684,6 +682,78 @@ iOS 音乐控制由系统处理。
 |------|------|------|------|
 | `getCountReminderInterval()` | 无 | `Future<int>` | 获取提醒间隔，单位分钟 |
 | `setCountReminderInterval(int intervalMinutes)` | 0、30、60、90 或 120 | `Future<void>` | 0=关闭，其余为提醒间隔 |
+
+##### 3.2.1.29 久坐提醒设置与获取
+
+> 功能配置表属性：`isSupportSedentary`（Dart 侧 `FunctionMenu.isSupportSedentary`）。仅支持该能力的设备可使用。
+>
+> 对应原生 Android / iOS SDK 文档 §3.2.1.29，接口语义一致。
+>
+> 在指定时段内，设备检测到用户持续久坐超过提醒间隔后震动提醒。
+
+方法说明：
+
+`Future<ReminderConfig> getSedentaryReminder()`
+
+`Future<void> setSedentaryReminder(ReminderConfig config)`
+
+ReminderConfig 参数说明：
+
+| 参数            | 类型 | 说明             | 值                                 |
+| --------------- | ---- | ---------------- | ---------------------------------- |
+| isOpen          | bool | 久坐提醒开关     | true: 开启; false: 关闭            |
+| startHour/startMin | int | 提醒时段开始  | 0-23 / 0-59                        |
+| endHour/endMin  | int  | 提醒时段结束     | 0-23 / 0-59                        |
+| intervalMinutes | int  | 提醒间隔，单位分钟 | 时段内持续久坐触发提醒的时间     |
+
+调用示例：
+
+```dart
+// 查询当前配置
+final config = await ring.getSedentaryReminder();
+debugPrint('久坐提醒 ${config.isOpen ? "开" : "关"} '
+    '${config.startHour}:${config.startMin}-${config.endHour}:${config.endMin} '
+    '间隔 ${config.intervalMinutes} 分钟');
+
+// 设置：开启，09:00-18:00，间隔 60 分钟
+await ring.setSedentaryReminder(ReminderConfig(
+  isOpen: true,
+  startHour: 9, startMin: 0,
+  endHour: 18, endMin: 0,
+  intervalMinutes: 60,
+));
+```
+
+##### 3.2.1.30 喝水提醒设置与获取
+
+> 功能配置表属性：`isDrink`（Dart 侧 `FunctionMenu.isDrink`）。仅支持该能力的设备可使用。
+>
+> 对应原生 Android / iOS SDK 文档 §3.2.1.30，接口语义一致。
+>
+> 在指定时段内，设备按提醒间隔周期性震动提醒喝水。
+
+方法说明：
+
+`Future<ReminderConfig> getDrinkReminder()`
+
+`Future<void> setDrinkReminder(ReminderConfig config)`
+
+ReminderConfig 参数说明：与 3.2.1.29 相同（`isOpen` 为喝水提醒开关，`intervalMinutes` 为时段内喝水提醒的触发间隔）。
+
+调用示例：
+
+```dart
+// 查询当前配置
+final config = await ring.getDrinkReminder();
+
+// 设置：开启，08:00-22:00，间隔 30 分钟
+await ring.setDrinkReminder(ReminderConfig(
+  isOpen: true,
+  startHour: 8, startMin: 0,
+  endHour: 22, endMin: 0,
+  intervalMinutes: 30,
+));
+```
 
 #### 3.2.2 健康数据同步(实时单次与全天检测)
 
@@ -1029,7 +1099,7 @@ OTA 进度范围为 `0.0–1.0`。
 
 | 方法 / Stream | 参数 | 返回 | 说明 |
 |--------------|------|------|------|
-| `setWorkoutRealtimeEnabled(bool enabled)` | 是否开启实时数据 | `Future<void>` | 进入运动页面时开启，离开页面时关闭 |
+| `setWorkoutRealtimeEnabled(bool enabled)` | 是否开启实时数据 | `Future<void>` | 进入运动页面时开启，离开页面时关闭；调用成功表示设备已确认，失败抛 `RwfitException` |
 | `onWorkoutRealtimeData` | — | `Stream<WorkoutRealtimeData>` | 实时运动统计 |
 
 连接设备后，先订阅 `onWorkoutRealtimeData`，再调用 `setWorkoutRealtimeEnabled(true)` 开启实时数据；离开运动页面时调用 `setWorkoutRealtimeEnabled(false)`，并取消订阅。
@@ -1059,6 +1129,9 @@ OTA 进度范围为 `0.0–1.0`。
 | 方法 | 参数 | 返回 | 说明 |
 |------|------|------|------|
 | `getWorkoutReports()` | 无 | `Future<List<WorkoutReport>>` | 同步设备保存的运动报告 |
+
+> [!IMPORTANT]
+> 多运动报告为**读取即删除**：每次获取成功后设备端即清空该批报告，App 应及时自行保存；之后再次获取返回空列表。设备无已存报告（或个别异常帧）时同样返回空列表，不作为错误。
 
 **`WorkoutReport` 字段：**
 
@@ -1178,6 +1251,236 @@ final reports = await ring.getWorkoutReports();
 
 以上是原始睡眠实时协议，与 3.2.2.4.4 的历史睡眠 `sleepType` 不同。
 
+#### 3.2.6 录音
+
+> 智能录音戒指的录音控制、状态查询与录音文件管理(文件列表/下载/删除/格式化)。
+>
+> 对应原生 Android / iOS SDK 文档 §3.2.5 录音功能，接口语义一致。
+>
+> 配置表属性: `isSupportRecording`（见 [3.1.6 设备功能配置表](#316-设备功能配置表)，Dart 侧 `FunctionMenu.isSupportRecording`）；需设备硬件支持 MIC，不支持时不要调用本节接口。
+
+##### 3.2.6.1 开始/停止录音
+
+> 控制设备开始或停止录音; 设备开始录音后本地保存文件.
+
+方法说明:
+
+`Future<int> recordControl(bool start)`
+
+参数说明:
+
+| 参数   | 类型 | 说明     | 值                    |
+| ------ | ---- | -------- | --------------------- |
+| start  | bool | 布尔类型 | true: 开始录音; false: 停止录音; |
+
+返回值为操作后的录音状态:
+
+| 值   | 说明   |
+| ---- | ------ |
+| 0x01 | 录音中 |
+| 0x00 | 空闲   |
+
+调用示例:
+
+```dart
+final status = await ring.recordControl(true); // 0x01 = 已开始录音
+```
+
+##### 3.2.6.2 查询录音状态
+
+> 查询设备当前是否正在录音, 以及录音区容量信息; APP连接后建议先查询一次, 确认设备录音状态.
+
+方法说明:
+
+`Future<RecordStatus> getRecordStatus()`
+
+返回数据 RecordStatus 参数说明:
+
+| RecordStatus参数 | 类型 | 说明 | 值                                 |
+| ---------------- | ---- | ---- | ---------------------------------- |
+| status           | int  |      | 0x01: 录音中; 0x00: 空闲;         |
+| recording        | bool |      | 是否录音中                         |
+| startTime        | int  |      | 本次录音开始时间戳, 单位秒(s), 仅录音中返回; |
+| duration         | int  |      | 已录音时长, 单位秒(s), 仅录音中返回; |
+| totalCapacity    | int  |      | 录音区总容量, 单位字节(B);         |
+| remainingCapacity| int  |      | 录音区剩余容量, 单位字节(B);       |
+
+调用示例:
+
+```dart
+final status = await ring.getRecordStatus();
+if (status.recording) {
+  debugPrint('录音中，已录 ${status.duration}s，'
+      '剩余 ${status.remainingCapacity}/${status.totalCapacity} B');
+}
+```
+
+录音状态实时推送: `Stream<RecordStatus> get onRecordStatus`。设备侧操作导致录音状态变化时主动推送；主动查询仍使用 `getRecordStatus()`。两端均支持。
+
+##### 3.2.6.3 获取录音文件列表
+
+> 获取设备上全部录音文件的元信息; 原生 SDK 自动拼接分页数据, 一次性返回完整列表.
+
+方法说明:
+
+`Future<List<RecordFileItem>> getRecordFileList()`
+
+返回数据 RecordFileItem 参数说明:
+
+| RecordFileItem参数 | 类型 | 说明 | 值                                             |
+| ------------------ | ---- | ---- | ---------------------------------------------- |
+| fileId             | int  |      | 文件ID, 下载(3.2.6.4)/删除(3.2.6.6)时使用;    |
+| fileSize           | int  |      | 文件大小, 单位字节(B);                         |
+| duration           | int  |      | 录音时长, 单位秒(s);                           |
+| timestamp          | int  |      | 录音时间, Unix秒时间戳, SDK已完成转换;         |
+
+调用示例:
+
+```dart
+final files = await ring.getRecordFileList();
+for (final f in files) {
+  debugPrint('fileId=${f.fileId} ${f.duration}s ${f.fileSize}B');
+}
+```
+
+##### 3.2.6.4 下载录音文件
+
+> 按文件ID下载单个录音文件内容; 传输为顺序传输, **暂不支持断点续传, 失败需重新下载整个文件**;
+> 下载完成后自动转换为标准 Ogg Opus(.opus) 文件并保存到本地, 返回文件绝对路径.
+
+方法说明:
+
+`Future<String> transferRecordFile(int fileId)`
+
+参数说明:
+
+| 参数   | 类型 | 说明 | 值                                                   |
+| ------ | ---- | ---- | ---------------------------------------------------- |
+| fileId | int  |      | 文件ID, 来自 `getRecordFileList()` 返回的 `fileId`;  |
+
+下载进度与失败事件: `Stream<RecordFileTransfer> get onRecordTransfer`。
+
+返回数据 RecordFileTransfer 参数说明:
+
+| RecordFileTransfer参数 | 类型    | 说明 | 值                                        |
+| ---------------------- | ------- | ---- | ----------------------------------------- |
+| fileType               | int     |      | 0x01: 录音;                               |
+| duration               | int     |      | 录音时长, 单位秒(s);                      |
+| timestamp              | int     |      | 录音时间, Unix秒时间戳;                   |
+| fileId                 | int     |      | 文件ID;                                   |
+| format                 | int     |      | 0x02: OPUS;                               |
+| fileSize               | int     |      | 文件总大小, 单位字节(B);                  |
+| received               | int     |      | 已接收字节数, 单位字节(B);                |
+| progress               | double  |      | 传输进度 0~1;                             |
+| complete               | bool    |      | 是否传输完成;                             |
+| completedAt            | int     |      | 传输完成时间戳, 单位秒(s);                |
+| filePath               | String? |      | complete=true 时的本地 Ogg Opus 文件路径; |
+| errorCode              | int?    |      | 下载失败时的错误码, 成功时为 null;        |
+
+调用示例:
+
+```dart
+final sub = ring.onRecordTransfer.listen((e) {
+  debugPrint('下载 ${e.fileId}: ${(e.progress * 100).toStringAsFixed(0)}%');
+  if (e.errorCode != null) debugPrint('下载失败: ${e.errorCode}');
+});
+final path = await ring.transferRecordFile(fileId); // 完成时返回 .opus 路径
+```
+
+本地保存说明: 文件自动保存到 App 专属 Recording 目录（Android: `getExternalFilesDir(DOWNLOADS)/Recording`；iOS: `Documents/Recording`），命名 `{fileId}_{duration}_{downloadAt}.opus`。
+
+##### 3.2.6.5 获取本地录音文件列表
+
+> 已下载保存到本地的录音文件列表, 按最后修改时间倒序.
+
+方法说明:
+
+`Future<List<LocalRecordFile>> getLocalRecordFileList()`
+
+返回数据 LocalRecordFile 参数说明:
+
+| LocalRecordFile参数 | 类型    | 说明 | 值                                                  |
+| ------------------- | ------- | ---- | --------------------------------------------------- |
+| name                | String  |      | 文件名, 格式 `{fileId}_{duration}_{downloadAt}.opus` |
+| path                | String  |      | 文件绝对路径;                                       |
+| fileSize            | int     |      | 文件大小, 单位字节(B);                              |
+| lastModified        | int     |      | 最后修改时间, 单位毫秒(ms);                         |
+| fileId              | int?    |      | 从文件名解析的文件ID; 解析失败为 null;              |
+| duration            | int?    |      | 从文件名解析的录制时长(秒), 与设备端一致; 解析失败为 null; |
+
+调用示例:
+
+```dart
+final local = await ring.getLocalRecordFileList();
+```
+
+##### 3.2.6.6 删除录音文件
+
+> 按文件ID删除设备上的单个录音文件.
+
+方法说明:
+
+`Future<int> deleteRecordFile(int fileId)`
+
+参数说明:
+
+| 参数   | 类型 | 说明 | 值                                                   |
+| ------ | ---- | ---- | ---------------------------------------------------- |
+| fileId | int  |      | 文件ID, 来自 `getRecordFileList()` 返回的 `fileId`;  |
+
+返回值状态码:
+
+| 值   | 说明 |
+| ---- | ---- |
+| 0x00 | 成功 |
+| 其它 | 失败 |
+
+调用示例:
+
+```dart
+final result = await ring.deleteRecordFile(fileId); // 0x00 成功
+```
+
+##### 3.2.6.7 格式化录音区
+
+> 清空设备录音区, **删除设备上全部录音文件, 不可恢复, 需二次确认后调用.**
+
+方法说明:
+
+`Future<int> formatRecordStorage()`
+
+返回值状态码: 0x00 成功, 其它失败。
+
+调用示例:
+
+```dart
+// UI 二次确认后调用
+final result = await ring.formatRecordStorage();
+```
+
+##### 3.2.6.8 播放前置转换
+
+> iOS 的 AVFoundation 不认 Ogg 容器, 播放前需转 16bit PCM WAV; Android 的 MediaPlayer 原生支持 Ogg Opus.
+
+方法说明:
+
+`Future<String> convertOggToWav(String path)`
+
+参数说明:
+
+| 参数 | 类型   | 说明 | 值                              |
+| ---- | ------ | ---- | ------------------------------- |
+| path | String |      | 本地 .opus 文件路径;            |
+
+返回值: iOS 返回转换后的 WAV 文件路径（缓存在 Caches/ring_wav，同名不重复转换）；Android 原样返回入参路径。
+
+调用示例:
+
+```dart
+final playable = await ring.convertOggToWav(path);
+// iOS: 播放 playable(.wav); Android: 直接播放原路径(.opus)
+```
+
 ---
 
 ## 4. 附录
@@ -1287,6 +1590,14 @@ Future<void> connectAndRead() async {
 ---
 
 ## Flutter 插件修订记录
+
+**v0.0.9_20260922** (2026.09.22)
+
+- 修复获取多运动报告在设备无已存数据时返回 201 的问题：无数据按空列表返回，与 iOS 行为一致
+- 新增录音功能：录音控制、状态查询与实时推送、录音文件列表与下载、本地录音列表、删除、格式化
+- 新增久坐提醒设置与获取（3.2.1.29）
+- 新增喝水提醒设置与获取（3.2.1.30）
+- 原生 SDK 升级至 260922 版本（Android `RW_SDK_V2_20260922`、iOS `RW_SDK_V2_260922`）；iOS 最低系统要求提升至 iOS 15
 
 **v0.0.8_20260920** (2026.09.20)
 

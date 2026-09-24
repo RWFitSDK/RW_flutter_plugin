@@ -32,7 +32,7 @@ dependencies:
   rwfit_ble:
     git:
       url: https://github.com/RWFitSDK/RW_flutter_plugin.git
-      ref: v0.0.8
+      ref: v0.0.9
 ```
 
 Then fetch the dependency:

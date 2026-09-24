@@ -16,6 +16,16 @@
 @property (nonatomic, strong) NSTimer *scanTimeoutTimer;
 @property (nonatomic, assign) BOOL forwardHealthSyncEvents;
 @property (nonatomic, strong) NSMutableDictionary<NSString *, DHPeripheralModel *> *discoveredDevices;
+// 录音：列表元数据缓存（transfer 进度事件里补齐 duration/timestamp/fileSize）
+@property (nonatomic, strong) NSMutableDictionary<NSNumber *, NSDictionary *> *recordFileMetadata;
+// fileId → 点击下载时的手机时刻(秒)。设备 RTC 不对时、SDK 时间不可信,
+// 落盘文件名第三段用它(见 transferRecordFile:result:)。
+@property (nonatomic, strong) NSMutableDictionary<NSNumber *, NSNumber *> *recordDownloadStartAt;
+// fileId → 本次传输进度帧报出的文件大小(字节)。完成事件的 fileSize/received 优先用它，
+// 未先查列表直接下载时缓存为空，避免完成事件大小退化为 0。
+@property (nonatomic, strong) NSMutableDictionary<NSNumber *, NSNumber *> *recordTransferFileSize;
+// Ogg 封装/落盘/WAV 转换都走串行队列，避免与 BLE 回调线程互相干扰
+@property (nonatomic) dispatch_queue_t recordFileQueue;
 @end
 
 @implementation RwfitBlePlugin
@@ -31,6 +41,10 @@
                                   binaryMessenger:[registrar messenger]];
     RwfitBlePlugin *instance = [[RwfitBlePlugin alloc] init];
     instance.discoveredDevices = [NSMutableDictionary dictionary];
+    instance.recordFileMetadata = [NSMutableDictionary dictionary];
+    instance.recordDownloadStartAt = [NSMutableDictionary dictionary];
+    instance.recordTransferFileSize = [NSMutableDictionary dictionary];
+    instance.recordFileQueue = dispatch_queue_create("rwfit_ble.record", DISPATCH_QUEUE_SERIAL);
     [registrar addMethodCallDelegate:instance channel:method];
     [event setStreamHandler:instance];
 }
@@ -65,7 +79,7 @@
     } else if ([m isEqualToString:@"getSDKVersion"]) {
         [self ok:result extra:@{@"version": [DHBleCommand getSDKVersion] ?: @""}];
     } else if ([m isEqualToString:@"getPluginVersion"]) {
-        NSString *v = [NSString stringWithFormat:@"0.0.8_%@", [DHBleCommand getSDKVersion] ?: @""];
+        NSString *v = [NSString stringWithFormat:@"0.0.9_%@", [DHBleCommand getSDKVersion] ?: @""];
         [self ok:result extra:@{@"pluginVersion": v}];
     } else if ([m isEqualToString:@"isBleConnected"]) {
         [self ok:result extra:@{@"connected": @([DHBleCentralManager isConnected])}];
@@ -255,11 +269,12 @@
             [self simple:code result:result action:@"controlWorkout"];
         }];
     } else if ([m isEqualToString:@"setWorkoutRealtimeEnabled"]) {
-        // 设备对进入/退出多运动的应答帧即实时数据帧（会被 push 数据冲掉，设备侧问题），
-        // 回调不可靠；两端一致：调用后立即返回成功，数据经推送回调继续上报。
+        // SDK 260922 设备应答已可靠：等 ACK 再回复，失败上抛（与 Android 对齐）。
+        // 实时数据经 RingRuningData 通知推送，与本调用的应答无关。
         UInt8 enabled = [args[@"enabled"] boolValue] ? 1 : 0;
-        [DHBleCommand setRingEnterWorkOut:enabled block:^(int code, id data) {}];
-        [self ok:result extra:nil];
+        [DHBleCommand setRingEnterWorkOut:enabled block:^(int code, id data) {
+            [self simple:code result:result action:@"setWorkoutRealtimeEnabled"];
+        }];
     } else if ([m isEqualToString:@"getWorkoutReports"]) {
         [self getWorkoutReports:result];
     } else if ([m isEqualToString:@"syncAllHealthData"]) {
@@ -511,6 +526,31 @@
             [self simple:code result:result action:@"setCountReminderInterval"];
         }];
     }
+    // ---- 久坐 / 喝水提醒（时段真实可配置，区别于全天检测的固定 00:00–23:59）----
+    else if ([m isEqualToString:@"getSedentaryRemind"]) {
+        [DHBleCommand getSedentaryRemind:^(int code, id data) {
+            [self handleCode:code result:result successBlock:^{
+                [self ok:result extra:[self reminderDictFrom:data]];
+            }];
+        }];
+    }
+    else if ([m isEqualToString:@"setSedentaryRemind"]) {
+        [DHBleCommand setSedentaryRemind:[self reminderBeanFrom:args] block:^(int code, id data) {
+            [self simple:code result:result action:@"setSedentaryRemind"];
+        }];
+    }
+    else if ([m isEqualToString:@"getDrinkRemind"]) {
+        [DHBleCommand getDrinkRemind:^(int code, id data) {
+            [self handleCode:code result:result successBlock:^{
+                [self ok:result extra:[self reminderDictFrom:data]];
+            }];
+        }];
+    }
+    else if ([m isEqualToString:@"setDrinkRemind"]) {
+        [DHBleCommand setDrinkRemind:[self reminderBeanFrom:args] block:^(int code, id data) {
+            [self simple:code result:result action:@"setDrinkRemind"];
+        }];
+    }
     // ---- 传感器原始数据 ----
     else if ([m isEqualToString:@"controlSensorRaw"]) {
         UInt8 outputType = [args[@"enabled"] boolValue] ? 1 : 2;
@@ -545,6 +585,74 @@
     else if ([m isEqualToString:@"createOrRemoveBond"]) {
         [self ok:result extra:@{@"result": @NO}]; // iOS 无蓝牙 HID 配对概念
     }
+    // ---- 录音（Android / iOS 统一契约）----
+    else if ([m isEqualToString:@"recordControl"]) {
+        BOOL start = [args[@"start"] boolValue];
+        [DHBleCommand recordControl:start block:^(int code, id data) {
+            [self handleCode:code result:result successBlock:^{
+                [self ok:result extra:@{@"result": [data isKindOfClass:[NSNumber class]] ? data : @0}];
+            }];
+        }];
+    }
+    else if ([m isEqualToString:@"getRecordStatus"]) {
+        [DHBleCommand getRecordStatus:^(int code, id data) {
+            [self handleCode:code result:result successBlock:^{
+                NSDictionary *status =
+                    [data isKindOfClass:[NSDictionary class]] ? data : @{};
+                NSInteger statusValue = [status[@"status"] integerValue];
+                // key 归一化：recording 缺失时回退 isRecording，再回退 status==1（与 Android 对齐）
+                BOOL recording = status[@"recording"] != nil
+                    ? [status[@"recording"] boolValue]
+                    : (status[@"isRecording"] != nil
+                        ? [status[@"isRecording"] boolValue]
+                        : statusValue == 1);
+                [self ok:result extra:@{
+                    @"status": @(statusValue),
+                    @"recording": @(recording),
+                    @"startTime": @([status[@"startTime"] longLongValue]),
+                    @"duration": @([status[@"duration"] longLongValue]),
+                    @"totalCapacity": @([status[@"totalCapacity"] longLongValue]),
+                    @"remainingCapacity": @([status[@"remainingCapacity"] longLongValue])
+                }];
+            }];
+        }];
+    }
+    else if ([m isEqualToString:@"getRecordFileList"]) {
+        [self getRecordFileList:result];
+    }
+    else if ([m isEqualToString:@"getLocalRecordFileList"]) {
+        [self getLocalRecordFileList:result];
+    }
+    else if ([m isEqualToString:@"transferRecordFile"]) {
+        [self transferRecordFile:[args[@"fileId"] unsignedIntValue] result:result];
+    }
+    else if ([m isEqualToString:@"deleteRecordFile"]) {
+        UInt32 fileId = [args[@"fileId"] unsignedIntValue];
+        [DHBleCommand deleteRecordFile:fileId block:^(int code, id data) {
+            [self handleCode:code result:result successBlock:^{
+                dispatch_async(self.recordFileQueue, ^{
+                    [self.recordFileMetadata removeObjectForKey:@(fileId)];
+                    [self.recordTransferFileSize removeObjectForKey:@(fileId)];
+                    [self ok:result extra:@{@"result": [data isKindOfClass:[NSNumber class]] ? data : @0}];
+                });
+            }];
+        }];
+    }
+    else if ([m isEqualToString:@"formatRecordStorage"]) {
+        [DHBleCommand formatRecordStorage:^(int code, id data) {
+            [self handleCode:code result:result successBlock:^{
+                dispatch_async(self.recordFileQueue, ^{
+                    [self.recordFileMetadata removeAllObjects];
+                    [self.recordTransferFileSize removeAllObjects];
+                    [self ok:result extra:@{@"result": [data isKindOfClass:[NSNumber class]] ? data : @0}];
+                });
+            }];
+        }];
+    }
+    // iOS 播放前置：AVFoundation 不认 Ogg 容器，先转 16bit PCM WAV；Android 端此方法为 no-op
+    else if ([m isEqualToString:@"convertOggToWav"]) {
+        [self convertOggToWav:[self normalizedFilePath:args[@"path"]] result:result];
+    }
     else {
         result(FlutterMethodNotImplemented);
     }
@@ -570,6 +678,284 @@
     }];
     [DHBleCentralManager connectDeviceWithModel:model];
     [self ok:result extra:nil];
+}
+
+#pragma mark - 录音文件
+
+- (NSString *)normalizedFilePath:(id)value {
+    NSString *path = [self stringValue:value];
+    if ([path hasPrefix:@"file://"]) {
+        path = [[NSURL URLWithString:path] path] ?: @"";
+    }
+    return path;
+}
+
+- (NSDictionary *)normalizedRecordItem:(id)value {
+    NSDictionary *item = [value isKindOfClass:[NSDictionary class]] ? value : @{};
+    return @{
+        @"fileId": @([item[@"fileId"] unsignedLongLongValue]),
+        @"fileSize": @([item[@"fileSize"] unsignedLongLongValue]),
+        @"duration": @([item[@"duration"] longLongValue]),
+        @"timestamp": @([item[@"timestamp"] longLongValue])
+    };
+}
+
+- (void)getRecordFileList:(FlutterResult)result {
+    [DHBleCommand getRecordFileList:^(int code, id data) {
+        [self handleCode:code result:result successBlock:^{
+            // 元数据字典统一在 recordFileQueue 上读写（与下载完成/进度路径互斥），
+            // SDK 回调线程与 recordFileQueue 并发访问 NSMutableDictionary 会崩
+            dispatch_async(self.recordFileQueue, ^{
+                NSArray *rawItems = [data isKindOfClass:[NSArray class]] ? data : @[];
+                NSMutableArray *items = [NSMutableArray arrayWithCapacity:rawItems.count];
+                // 缓存列表元数据：transfer 进度事件里 duration/timestamp/fileSize 从这里补齐
+                [self.recordFileMetadata removeAllObjects];
+                for (id value in rawItems) {
+                    NSDictionary *item = [self normalizedRecordItem:value];
+                    [items addObject:item];
+                    self.recordFileMetadata[item[@"fileId"]] = item;
+                }
+                [self ok:result extra:@{@"data": items}];
+            });
+        }];
+    }];
+}
+
+- (NSString *)recordingDirectoryPath {
+    NSString *documents =
+        [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)
+            firstObject];
+    return [documents stringByAppendingPathComponent:@"Recording"];
+}
+
+- (void)getLocalRecordFileList:(FlutterResult)result {
+    dispatch_async(self.recordFileQueue, ^{
+        NSString *directory = [self recordingDirectoryPath];
+        NSFileManager *fileManager = [NSFileManager defaultManager];
+        BOOL isDirectory = NO;
+        if (![fileManager fileExistsAtPath:directory isDirectory:&isDirectory] || !isDirectory) {
+            [self ok:result extra:@{@"data": @[]}];
+            return;
+        }
+        NSArray<NSString *> *names =
+            [fileManager contentsOfDirectoryAtPath:directory error:nil] ?: @[];
+        NSMutableArray<NSDictionary *> *items = [NSMutableArray array];
+        for (NSString *name in names) {
+            if ([name hasPrefix:@"."]) continue;
+            NSString *path = [directory stringByAppendingPathComponent:name];
+            NSDictionary *attributes = [fileManager attributesOfItemAtPath:path error:nil];
+            if (![attributes[NSFileType] isEqualToString:NSFileTypeRegular]) continue;
+            NSMutableDictionary *item = [@{
+                @"name": name,
+                @"path": path,
+                @"fileSize": @([attributes fileSize]),
+                // 与 Android File.lastModified() 一致，用毫秒
+                @"lastModified":
+                    @((long long)([attributes[NSFileModificationDate] timeIntervalSince1970] * 1000))
+            } mutableCopy];
+            // 文件名格式:{fileId}_{duration}_{downloadAt}.opus
+            // duration 是 SDK 内部按帧数算的权威录制时长(秒),与 ogg 文件实际时长一致;
+            // downloadAt 是点击下载时的手机时刻(设备时间不可信,不用 SDK 的)。
+            NSArray<NSString *> *parts = [name componentsSeparatedByString:@"_"];
+            NSString *fileIdStr = parts.count > 0 ? parts[0] : @"";
+            NSScanner *scanner = [NSScanner scannerWithString:fileIdStr ?: @""];
+            unsigned long long fileId = 0;
+            if ([scanner scanUnsignedLongLong:&fileId] && scanner.isAtEnd) {
+                item[@"fileId"] = @(fileId);
+            }
+            if (parts.count > 1) {
+                long long duration = [parts[1] longLongValue];
+                if (duration > 0) item[@"duration"] = @(duration);
+            }
+            [items addObject:item];
+        }
+        [items sortUsingComparator:^NSComparisonResult(NSDictionary *left, NSDictionary *right) {
+            return [right[@"lastModified"] compare:left[@"lastModified"]];
+        }];
+        [self ok:result extra:@{@"data": items}];
+    });
+}
+
+- (NSMutableDictionary *)recordTransferPayloadForFileId:(UInt32)fileId
+                                                progress:(CGFloat)progress
+                                                received:(unsigned long long)received
+                                                fileSize:(unsigned long long)fileSize
+                                                 complete:(BOOL)complete {
+    NSDictionary *metadata = self.recordFileMetadata[@(fileId)] ?: @{};
+    unsigned long long normalizedSize =
+        fileSize > 0 ? fileSize : [metadata[@"fileSize"] unsignedLongLongValue];
+    return [@{
+        @"fileType": @1,   // 0x01 录音（与 Android RecordFileTransferBean 及文档一致）
+        @"duration": @([metadata[@"duration"] longLongValue]),
+        @"timestamp": @([metadata[@"timestamp"] longLongValue]),
+        @"fileId": @(fileId),
+        @"format": @2,     // 0x02 OPUS（同上）
+        @"fileSize": @(normalizedSize),
+        @"received": @(received),
+        @"progress": @(progress),
+        @"complete": @(complete),
+        @"completedAt": @(complete ? (long long)[[NSDate date] timeIntervalSince1970] : 0)
+    } mutableCopy];
+}
+
+// 下载失败/完成后清理本次传输的临时记录（幂等，可在任意失败分支调用）
+- (void)cleanupTransferStateForFileId:(UInt32)fileId {
+    [self.recordDownloadStartAt removeObjectForKey:@(fileId)];
+    [self.recordTransferFileSize removeObjectForKey:@(fileId)];
+}
+
+- (void)transferRecordFile:(UInt32)fileId result:(FlutterResult)result {
+    // 记录“点击下载”的手机时刻,落盘时用作文件名第三段(设备时间不可信,不用 SDK 的)。
+    // 写入与完成块的读取/移除都收进 recordFileQueue（下载往返远大于队列排空，
+    // 完成块执行时该写入必已落队）
+    dispatch_async(self.recordFileQueue, ^{
+        self.recordDownloadStartAt[@(fileId)] =
+            @((long long)[[NSDate date] timeIntervalSince1970]);
+    });
+    [DHBleCommand transferRecordFile:fileId block:^(int code, id data) {
+        if (code != 0 || ![data isKindOfClass:[NSData class]]) {
+            // 失败事件读取 recordFileMetadata，与列表/删除/格式化路径互斥，
+            // 同样收进 recordFileQueue；顺带清理本次传输的临时记录
+            dispatch_async(self.recordFileQueue, ^{
+                [self cleanupTransferStateForFileId:fileId];
+                NSMutableDictionary *event =
+                    [self recordTransferPayloadForFileId:fileId
+                                                 progress:0
+                                                 received:0
+                                                 fileSize:0
+                                                  complete:NO];
+                event[@"code"] = @(code != 0 ? code : -2);
+                [self fire:@"rwfit:recordTransfer" data:event];
+                [self fail:result
+                       code:code != 0 ? code : -2
+                        msg:@"transfer record file failed"];
+            });
+            return;
+        }
+
+        NSData *opusData = data;
+        dispatch_async(self.recordFileQueue, ^{
+            NSError *error = nil;
+            // SDK 260922 在完成回调前已内部完成 OPUS→Ogg Opus 转换（转换失败以
+            // code!=0 回调，走上方错误路径），这里直接落盘。
+            // 事件口径统一为设备端原始字节数（与进度事件一致）；转换后的 Ogg 大小
+            // 即将落盘的 opusData.length，不进事件字段。优先用本次进度帧报出的大小，
+            // 未先查列表直接下载时不依赖列表缓存。
+            NSDictionary *metadata = self.recordFileMetadata[@(fileId)] ?: @{};
+            unsigned long long deviceSize = [self.recordTransferFileSize[@(fileId)] unsignedLongLongValue];
+            if (deviceSize == 0) deviceSize = [metadata[@"fileSize"] unsignedLongLongValue];
+            [self.recordTransferFileSize removeObjectForKey:@(fileId)];
+            long long duration = [metadata[@"duration"] longLongValue];
+
+            NSString *directory = [self recordingDirectoryPath];
+            if (![[NSFileManager defaultManager] createDirectoryAtPath:directory
+                                           withIntermediateDirectories:YES
+                                                            attributes:nil
+                                                                 error:&error]) {
+                NSMutableDictionary *event =
+                    [self recordTransferPayloadForFileId:fileId
+                                                 progress:0
+                                                 received:deviceSize
+                                                 fileSize:deviceSize
+                                                  complete:NO];
+                event[@"code"] = @-2;
+                [self cleanupTransferStateForFileId:fileId];
+                [self fire:@"rwfit:recordTransfer" data:event];
+                [self fail:result code:-2 msg:error.localizedDescription];
+                return;
+            }
+            // 文件名第三段 = 点击下载时的手机时刻(transferRecordFile 入口记录);
+            // 设备 RTC 不对时,SDK 时间不可信,一律不用。兜底:当前时间。仅用于命名。
+            NSNumber *startAt = self.recordDownloadStartAt[@(fileId)];
+            [self.recordDownloadStartAt removeObjectForKey:@(fileId)];
+            long long downloadAt =
+                startAt ? [startAt longLongValue] : (long long)[[NSDate date] timeIntervalSince1970];
+            NSString *fileName =
+                [NSString stringWithFormat:@"%u_%lld_%lld.opus", fileId, duration, downloadAt];
+            NSString *filePath = [directory stringByAppendingPathComponent:fileName];
+            if (![opusData writeToFile:filePath options:NSDataWritingAtomic error:&error]) {
+                NSMutableDictionary *event =
+                    [self recordTransferPayloadForFileId:fileId
+                                                 progress:0
+                                                 received:deviceSize
+                                                 fileSize:deviceSize
+                                                  complete:NO];
+                event[@"code"] = @-2;
+                [self cleanupTransferStateForFileId:fileId];
+                [self fire:@"rwfit:recordTransfer" data:event];
+                [self fail:result code:-2 msg:error.localizedDescription];
+                return;
+            }
+
+            // completedAt 用真实完成时刻（builder 默认值）；downloadAt 只用于文件名
+            NSMutableDictionary *event =
+                [self recordTransferPayloadForFileId:fileId
+                                             progress:1
+                                             received:deviceSize
+                                             fileSize:deviceSize
+                                              complete:YES];
+            event[@"filePath"] = filePath;
+            [self fire:@"rwfit:recordTransfer" data:event];
+            [self ok:result extra:@{@"filePath": filePath}];
+        });
+    } progressBlock:^(int code, CGFloat progress, id data) {
+        // 进度帧也读 recordFileMetadata，统一串到 recordFileQueue 上再组事件
+        dispatch_async(self.recordFileQueue, ^{
+            if (code != 0) {
+                NSMutableDictionary *event =
+                    [self recordTransferPayloadForFileId:fileId
+                                                 progress:progress
+                                                 received:0
+                                                 fileSize:0
+                                                  complete:NO];
+                event[@"code"] = @(code);
+                [self fire:@"rwfit:recordTransfer" data:event];
+                return;
+            }
+            NSDictionary *progressData =
+                [data isKindOfClass:[NSDictionary class]] ? data : @{};
+            unsigned long long reportedSize = [progressData[@"fileSize"] unsignedLongLongValue];
+            if (reportedSize > 0) {
+                self.recordTransferFileSize[@(fileId)] = @(reportedSize);
+            }
+            CGFloat normalized = progress > 1.0f ? progress / 100.0f : progress;
+            NSMutableDictionary *event =
+                [self recordTransferPayloadForFileId:fileId
+                                             progress:normalized
+                                             received:[progressData[@"received"] unsignedLongLongValue]
+                                             fileSize:[progressData[@"fileSize"] unsignedLongLongValue]
+                                              complete:NO];
+            [self fire:@"rwfit:recordTransfer" data:event];
+        });
+    }];
+}
+
+// Ogg Opus → 16bit PCM WAV（DHAudioConverter，务必后台线程执行，参考原生 demo）
+- (void)convertOggToWav:(NSString *)path result:(FlutterResult)result {
+    if (path.length == 0) {
+        [self fail:result code:-1 msg:@"path is required"];
+        return;
+    }
+    dispatch_async(self.recordFileQueue, ^{
+        NSString *cache =
+            [NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES)
+                firstObject];
+        // 同名同源缓存：重复播放同一录音不产生新文件
+        NSString *outputDirectory = [cache stringByAppendingPathComponent:@"ring_wav"];
+        NSString *fileName = [[path lastPathComponent] stringByDeletingPathExtension];
+        NSString *outputPath = [outputDirectory stringByAppendingPathComponent:
+            [fileName stringByAppendingPathExtension:@"wav"]];
+        [[NSFileManager defaultManager] createDirectoryAtPath:outputDirectory
+                                  withIntermediateDirectories:YES
+                                                   attributes:nil
+                                                        error:nil];
+        NSError *error = nil;
+        if (![DHAudioConverter convertOggOpusFile:path toWAVFile:outputPath error:&error]) {
+            [self fail:result code:-2 msg:error.localizedDescription ?: @"convert to wav failed"];
+            return;
+        }
+        [self ok:result extra:@{@"path": outputPath}];
+    });
 }
 
 #pragma mark - DHBleConnectDelegate（事件源）
@@ -695,8 +1081,8 @@
                    name:BluetoothNotificationCameraTakePicture object:nil];
     [center addObserver:self selector:@selector(handleWorkoutRealtimeData:)
                    name:BluetoothNotificationRingRuningData object:nil];
-    // SDK 260922 起 0x21 主动推送(触摸/电量/录音状态)统一走 ProtocolPush 通知;
-    // 插件当前只消费触摸事件, dataValue 为 {keyType, touchType} 字典
+    // SDK 260922 起 0x21 主动推送(触摸/电量/录音状态)统一走 ProtocolPush 通知,
+    // 三类插件均已消费
     [center addObserver:self selector:@selector(handleProtocolPush:)
                    name:BluetoothNotificationProtocolPush object:nil];
     [center addObserver:self selector:@selector(handleSensorRawData:)
@@ -766,17 +1152,48 @@
 
 - (void)handleProtocolPush:(NSNotification *)notification {
     NSDictionary *userInfo = notification.userInfo ?: @{};
-    if ([userInfo[@"dataType"] unsignedIntegerValue] != DHDevicePushTypeTouchEvent) return;
-    NSDictionary *event = [userInfo[@"dataValue"] isKindOfClass:NSDictionary.class]
-        ? userInfo[@"dataValue"] : nil;
-    if (event == nil) return;
-    NSInteger keyType = [event[@"keyType"] integerValue];
-    NSInteger touchType = [event[@"touchType"] integerValue];
-    [self fire:@"rwfit:touchEvent" data:@{
-        @"keyType": @(keyType),
-        @"touchType": @(touchType),
-        @"action": [self touchActionForKeyType:keyType touchType:touchType]
-    }];
+    NSUInteger dataType = [userInfo[@"dataType"] unsignedIntegerValue];
+    if (dataType == DHDevicePushTypeTouchEvent) {
+        NSDictionary *event = [userInfo[@"dataValue"] isKindOfClass:NSDictionary.class]
+            ? userInfo[@"dataValue"] : nil;
+        if (event == nil) return;
+        NSInteger keyType = [event[@"keyType"] integerValue];
+        NSInteger touchType = [event[@"touchType"] integerValue];
+        [self fire:@"rwfit:touchEvent" data:@{
+            @"keyType": @(keyType),
+            @"touchType": @(touchType),
+            @"action": [self touchActionForKeyType:keyType touchType:touchType]
+        }];
+        return;
+    }
+    if (dataType == DHDevicePushTypePower) {
+        // 电量与充电状态推送（与 getBattery 查询同实体；status 1=充电中）
+        if (![userInfo[@"dataValue"] isKindOfClass:[DHBatteryInfoModel class]]) return;
+        DHBatteryInfoModel *model = userInfo[@"dataValue"];
+        [self fire:@"rwfit:batteryChanged" data:@{
+            @"power": @([model battery]),
+            @"charging": @([model status] == 1)
+        }];
+        return;
+    }
+    if (dataType == DHDevicePushTypeRecordStatus) {
+        // 录音状态推送：SDK 字典带 isRecording，对外契约统一为 recording
+        // （与 Android RecordStatusBean 口径一致）
+        NSDictionary *status = [userInfo[@"dataValue"] isKindOfClass:NSDictionary.class]
+            ? userInfo[@"dataValue"] : nil;
+        if (status == nil) return;
+        NSInteger statusValue = [status[@"status"] integerValue];
+        [self fire:@"rwfit:recordStatus" data:@{
+            @"status": @(statusValue),
+            @"recording": @(status[@"isRecording"] != nil
+                ? [status[@"isRecording"] boolValue]
+                : statusValue == 1),
+            @"startTime": @([status[@"startTime"] longLongValue]),
+            @"duration": @([status[@"duration"] longLongValue]),
+            @"totalCapacity": @([status[@"totalCapacity"] longLongValue]),
+            @"remainingCapacity": @([status[@"remainingCapacity"] longLongValue])
+        }];
+    }
 }
 
 - (void)handleSensorRawData:(NSNotification *)notification {
@@ -799,6 +1216,35 @@
 - (void)dealloc {
     [self cancelScanTimeout];
     [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
+
+#pragma mark - 久坐 / 喝水提醒
+
+// 时段真实下发，不强制 00:00–23:59（与全天检测不同）
+- (DrinkReminderBean *)reminderBeanFrom:(NSDictionary *)args {
+    DrinkReminderBean *bean = [DrinkReminderBean new];
+    bean.isOpen = [args[@"isOpen"] boolValue];
+    bean.startHour = [args[@"startHour"] integerValue];
+    bean.startMin = [args[@"startMin"] integerValue];
+    bean.endHour = [args[@"endHour"] integerValue];
+    bean.endMin = [args[@"endMin"] integerValue];
+    bean.remindDuration = [args[@"intervalMinutes"] integerValue];
+    return bean;
+}
+
+- (NSDictionary *)reminderDictFrom:(id)data {
+    if (![data isKindOfClass:[DrinkReminderBean class]]) {
+        return @{};
+    }
+    DrinkReminderBean *bean = data;
+    return @{
+        @"isOpen": @(bean.isOpen),
+        @"startHour": @(bean.startHour),
+        @"startMin": @(bean.startMin),
+        @"endHour": @(bean.endHour),
+        @"endMin": @(bean.endMin),
+        @"intervalMinutes": @(bean.remindDuration)
+    };
 }
 
 #pragma mark - 全天检测（8 项共用）
@@ -1290,6 +1736,8 @@
         @"isSupportSensorRawSleep": @([model isSupportSensorRawSleep]),
         @"isSupportFallDetect": @([model isSupportFallDetect]),
         @"isSupportRecording": @([model isSupportRecording]),
+        @"isSupportSedentary": @([model isSupportSedentary]),
+        @"isDrink": @([model isDrink]),
         @"isFindDevice": @([model isFindDevice]),
         @"isTakePhoto": @([model isTakePhoto]),
         @"isLedLight": @([model isLEDLight]),

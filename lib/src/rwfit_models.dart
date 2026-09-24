@@ -89,6 +89,9 @@ class FunctionMenu {
   );
 
   bool get supportsWorkout => raw['isSupportWorkout'] == true;
+  bool get isSupportRecording => raw['isSupportRecording'] == true;
+  bool get isSupportSedentary => raw['isSupportSedentary'] == true;
+  bool get isDrink => raw['isDrink'] == true;
 }
 
 /// 设备当前多运动状态。
@@ -113,7 +116,6 @@ class WorkoutState {
   };
 }
 
-/// 实时健康数据。原生桥接统一传 Unix 秒，对外规范字段为 [timestampSec]。
 /// 单次实时测量结束结果。
 ///
 /// Android 端携带 [isSuccess] 与 [errorCode]：失败或 70 秒超时时 `isSuccess=false`
@@ -133,6 +135,7 @@ class RealtimeMeasureResult {
       );
 }
 
+/// 实时健康数据。原生桥接统一传 Unix 秒，对外规范字段为 [timestampSec]。
 class RealtimeData {
   /// 兼容旧代码使用毫秒构造；新代码应使用 [RealtimeData.fromSeconds]。
   @Deprecated('Use RealtimeData.fromSeconds instead.')
@@ -668,6 +671,64 @@ class Alarm {
 }
 
 /// 7 项全天健康检测与 PPG 定时监测共用的配置。
+/// 久坐/喝水提醒配置。
+///
+/// 与 [TimedConfig]（全天检测）共用原生 DrinkReminderBean，但语义不同：
+/// 提醒时段**真实可配置**（原生侧不强制 00:00–23:59）。
+class ReminderConfig {
+  const ReminderConfig({
+    required this.isOpen,
+    this.intervalMinutes = 30,
+    this.startHour = 0,
+    this.startMin = 0,
+    this.endHour = 23,
+    this.endMin = 59,
+  });
+
+  final bool isOpen;
+
+  /// 提醒间隔（分钟）。
+  final int intervalMinutes;
+  final int startHour;
+  final int startMin;
+  final int endHour;
+  final int endMin;
+
+  factory ReminderConfig.fromMap(Map<dynamic, dynamic> m) => ReminderConfig(
+    isOpen: m['isOpen'] == true,
+    intervalMinutes: (m['intervalMinutes'] as num?)?.toInt() ?? 30,
+    startHour: (m['startHour'] as num?)?.toInt() ?? 0,
+    startMin: (m['startMin'] as num?)?.toInt() ?? 0,
+    endHour: (m['endHour'] as num?)?.toInt() ?? 23,
+    endMin: (m['endMin'] as num?)?.toInt() ?? 59,
+  );
+
+  Map<String, dynamic> toMap() => {
+    'isOpen': isOpen,
+    'intervalMinutes': intervalMinutes,
+    'startHour': startHour,
+    'startMin': startMin,
+    'endHour': endHour,
+    'endMin': endMin,
+  };
+
+  ReminderConfig copyWith({
+    bool? isOpen,
+    int? intervalMinutes,
+    int? startHour,
+    int? startMin,
+    int? endHour,
+    int? endMin,
+  }) => ReminderConfig(
+    isOpen: isOpen ?? this.isOpen,
+    intervalMinutes: intervalMinutes ?? this.intervalMinutes,
+    startHour: startHour ?? this.startHour,
+    startMin: startMin ?? this.startMin,
+    endHour: endHour ?? this.endHour,
+    endMin: endMin ?? this.endMin,
+  );
+}
+
 class TimedConfig {
   const TimedConfig({
     required this.isOpen,
@@ -781,4 +842,158 @@ class VibrationConfig {
   );
 
   Map<String, dynamic> toMap() => {'count': count, 'level': level};
+}
+
+/// 电量与充电状态（设备主动推送）。
+class BatteryInfo {
+  const BatteryInfo({required this.power, required this.charging});
+
+  /// 电量百分比（0–100）。
+  final int power;
+
+  /// 是否正在充电。
+  final bool charging;
+
+  factory BatteryInfo.fromMap(Map<dynamic, dynamic> m) => BatteryInfo(
+    power: (m['power'] as num?)?.toInt() ?? 0,
+    charging: m['charging'] == true,
+  );
+}
+
+/// 设备录音状态。时间和容量字段保留设备/SDK 的原始单位。
+class RecordStatus {
+  const RecordStatus({
+    required this.status,
+    required this.recording,
+    required this.startTime,
+    required this.duration,
+    required this.totalCapacity,
+    required this.remainingCapacity,
+  });
+
+  /// 0x01 录音中；0x00 空闲。
+  final int status;
+  final bool recording;
+
+  /// 本次录音开始时间戳（秒），仅录音中有效。
+  final int startTime;
+
+  /// 已录音时长（秒），仅录音中有效。
+  final int duration;
+  final int totalCapacity;
+  final int remainingCapacity;
+
+  factory RecordStatus.fromMap(Map<dynamic, dynamic> m) => RecordStatus(
+    status: (m['status'] as num?)?.toInt() ?? 0,
+    recording: m['recording'] == true,
+    startTime: (m['startTime'] as num?)?.toInt() ?? 0,
+    duration: (m['duration'] as num?)?.toInt() ?? 0,
+    totalCapacity: (m['totalCapacity'] as num?)?.toInt() ?? 0,
+    remainingCapacity: (m['remainingCapacity'] as num?)?.toInt() ?? 0,
+  );
+}
+
+/// 设备端的一条录音文件记录。
+class RecordFileItem {
+  const RecordFileItem({
+    required this.fileId,
+    required this.fileSize,
+    required this.duration,
+    required this.timestamp,
+  });
+
+  final int fileId;
+  final int fileSize;
+  final int duration;
+  final int timestamp;
+
+  factory RecordFileItem.fromMap(Map<dynamic, dynamic> m) => RecordFileItem(
+    fileId: (m['fileId'] as num?)?.toInt() ?? 0,
+    fileSize: (m['fileSize'] as num?)?.toInt() ?? 0,
+    duration: (m['duration'] as num?)?.toInt() ?? 0,
+    timestamp: (m['timestamp'] as num?)?.toInt() ?? 0,
+  );
+}
+
+/// 原生桥接层保存在 App 专属 Recording 目录中的录音文件。
+class LocalRecordFile {
+  const LocalRecordFile({
+    required this.name,
+    required this.path,
+    required this.fileSize,
+    required this.lastModified,
+    this.fileId,
+    this.duration,
+  });
+
+  final String name;
+  final String path;
+  final int fileSize;
+  final int lastModified;
+
+  /// 文件名第一段 `{fileId}_{duration}_{downloadAt}.opus`；null 表示解析失败。
+  final int? fileId;
+
+  /// 设备端真实录制时长（秒），来自文件名第二段；null 表示解析失败。
+  final int? duration;
+
+  factory LocalRecordFile.fromMap(Map<dynamic, dynamic> m) => LocalRecordFile(
+    name: (m['name'] ?? '') as String,
+    path: (m['path'] ?? '') as String,
+    fileSize: (m['fileSize'] as num?)?.toInt() ?? 0,
+    lastModified: (m['lastModified'] as num?)?.toInt() ?? 0,
+    fileId: (m['fileId'] as num?)?.toInt(),
+    duration: (m['duration'] as num?)?.toInt(),
+  );
+}
+
+/// 录音文件下载进度/结果。
+///
+/// 下载完成时 [filePath] 指向桥接层已转换并保存的 Ogg Opus 文件；
+/// 失败时 [errorCode] 非空。
+class RecordFileTransfer {
+  const RecordFileTransfer({
+    required this.fileType,
+    required this.duration,
+    required this.timestamp,
+    required this.fileId,
+    required this.format,
+    required this.fileSize,
+    required this.received,
+    required this.progress,
+    required this.complete,
+    required this.completedAt,
+    this.filePath,
+    this.errorCode,
+  });
+
+  final int fileType;
+  final int duration;
+  final int timestamp;
+  final int fileId;
+  final int format;
+  final int fileSize;
+  final int received;
+  final double progress;
+  final bool complete;
+  final int completedAt;
+  final String? filePath;
+  final int? errorCode;
+
+  factory RecordFileTransfer.fromMap(Map<dynamic, dynamic> m) {
+    return RecordFileTransfer(
+      fileType: (m['fileType'] as num?)?.toInt() ?? 0,
+      duration: (m['duration'] as num?)?.toInt() ?? 0,
+      timestamp: (m['timestamp'] as num?)?.toInt() ?? 0,
+      fileId: (m['fileId'] as num?)?.toInt() ?? 0,
+      format: (m['format'] as num?)?.toInt() ?? 0,
+      fileSize: (m['fileSize'] as num?)?.toInt() ?? 0,
+      received: (m['received'] as num?)?.toInt() ?? 0,
+      progress: (m['progress'] as num?)?.toDouble() ?? 0,
+      complete: m['complete'] == true,
+      completedAt: (m['completedAt'] as num?)?.toInt() ?? 0,
+      filePath: m['filePath'] as String?,
+      errorCode: (m['code'] as num?)?.toInt(),
+    );
+  }
 }

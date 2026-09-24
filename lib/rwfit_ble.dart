@@ -71,6 +71,11 @@ class RwfitBle {
 
   Future<int> getPower() async => (await callAsync('getPower'))['power'] as int;
 
+  /// 设备电量变化主动推送（与 [getPower] 查询同源）。
+  /// 两端均支持；充电状态依赖设备固件，旧固件未返回时 `charging` 恒为 false。
+  Stream<BatteryInfo> get onBatteryChanged =>
+      onEvent(RwfitEvents.batteryChanged).map(BatteryInfo.fromMap);
+
   Future<FirmwareInfo> getFirmwareVersion() async =>
       FirmwareInfo.fromMap(await callAsync('getFirmwareVersion'));
 
@@ -176,6 +181,8 @@ class RwfitBle {
   ///
   /// 连接设备后，先订阅 [onWorkoutRealtimeData]，再传入 `true` 开启实时数据。
   /// 离开运动页面时传入 `false` 关闭，并取消订阅。
+  ///
+  /// 两端均等待设备 ACK 才完成（SDK 260922 起），失败抛 [RwfitException]。
   Future<void> setWorkoutRealtimeEnabled(bool enabled) =>
       callAsync('setWorkoutRealtimeEnabled', {'enabled': enabled});
 
@@ -284,6 +291,24 @@ class RwfitBle {
       'intervalMinutes': intervalMinutes,
     });
   }
+
+  // ---- 久坐 / 喝水提醒 ----
+
+  /// 久坐提醒配置。功能表位 [FunctionMenu.isSupportSedentary]；
+  /// 时段内持续久坐超过间隔后设备震动提醒。
+  Future<ReminderConfig> getSedentaryReminder() async =>
+      ReminderConfig.fromMap(await callAsync('getSedentaryRemind'));
+
+  Future<void> setSedentaryReminder(ReminderConfig c) =>
+      callAsync('setSedentaryRemind', c.toMap());
+
+  /// 喝水提醒配置。功能表位 [FunctionMenu.isDrink]；
+  /// 时段内设备按间隔周期性震动提醒喝水。
+  Future<ReminderConfig> getDrinkReminder() async =>
+      ReminderConfig.fromMap(await callAsync('getDrinkRemind'));
+
+  Future<void> setDrinkReminder(ReminderConfig c) =>
+      callAsync('setDrinkRemind', c.toMap());
 
   /// 开启或关闭 PPG/ACC/PPG Red/IR 原始数据采集。
   Future<void> controlSensorRaw(bool enabled, SensorRawSelection selection) =>
@@ -432,4 +457,60 @@ class RwfitBle {
     final switches = (await callAsync('getNotificationSwitch'))['switches'];
     return switches is Map ? switches.cast<String, dynamic>() : const {};
   }
+
+  // ==================== 录音 ====================
+
+  /// 开始或停止设备录音。调用前应检查功能表的 `isSupportRecording`
+  /// （[FunctionMenu.isSupportRecording]）。返回操作后的状态（0x01 录音中 / 0x00 空闲）。
+  Future<int> recordControl(bool start) async =>
+      (await callAsync('recordControl', {'start': start}))['result'] as int;
+
+  /// 查询录音状态与录音区容量。连接后建议先查询一次。
+  Future<RecordStatus> getRecordStatus() async =>
+      RecordStatus.fromMap(await callAsync('getRecordStatus'));
+
+  /// 设备侧操作导致录音状态变化时主动推送；主动查询仍使用 [getRecordStatus]。
+  /// 两端均支持（iOS 经 ProtocolPush 推送，字段已归一化）。
+  Stream<RecordStatus> get onRecordStatus =>
+      onEvent(RwfitEvents.recordStatus).map(RecordStatus.fromMap);
+
+  /// 获取设备上全部录音文件的元信息。
+  Future<List<RecordFileItem>> getRecordFileList() async {
+    final data =
+        (await callAsync('getRecordFileList'))['data'] as List? ?? const [];
+    return data.map((e) => RecordFileItem.fromMap(e as Map)).toList();
+  }
+
+  /// 桥接层已保存到 App 专属 Recording 目录中的本地录音文件。
+  Future<List<LocalRecordFile>> getLocalRecordFileList() async {
+    final data =
+        (await callAsync('getLocalRecordFileList'))['data'] as List? ??
+        const [];
+    return data.map((e) => LocalRecordFile.fromMap(e as Map)).toList();
+  }
+
+  /// 下载录音文件；完成后由桥接层转换并保存为 Ogg Opus，返回文件绝对路径。
+  /// 不支持断点续传，失败整文件重下。
+  Future<String> transferRecordFile(int fileId) async =>
+      (await callAsync('transferRecordFile', {'fileId': fileId}))['filePath']
+          as String;
+
+  /// 下载进度（0.0~1.0）及失败事件。失败时 [RecordFileTransfer.errorCode] 非空。
+  Stream<RecordFileTransfer> get onRecordTransfer =>
+      onEvent(RwfitEvents.recordTransfer).map(RecordFileTransfer.fromMap);
+
+  /// 删除设备上的单个录音文件。返回状态码（0x00 成功）。
+  Future<int> deleteRecordFile(int fileId) async =>
+      (await callAsync('deleteRecordFile', {'fileId': fileId}))['result']
+          as int;
+
+  /// 格式化会清空设备端全部录音（不可恢复），UI 中先二次确认。
+  Future<int> formatRecordStorage() async =>
+      (await callAsync('formatRecordStorage'))['result'] as int;
+
+  /// 播放前置转换：iOS 上把 Ogg Opus 转成 16bit PCM WAV（AVFoundation 不认
+  /// Ogg 容器），返回新文件路径；Android 的 MediaPlayer 原生支持 Ogg Opus，
+  /// 原样返回入参路径。
+  Future<String> convertOggToWav(String path) async =>
+      (await callAsync('convertOggToWav', {'path': path}))['path'] as String;
 }

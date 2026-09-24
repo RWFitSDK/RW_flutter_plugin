@@ -3,6 +3,7 @@ package com.rwfit.rwfit_ble;
 import android.app.Activity;
 import android.content.Context;
 import android.media.AudioManager;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
@@ -14,13 +15,19 @@ import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 
+import java.io.File;
+import java.io.FileOutputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import com.example.blesdk.DHBleSdk;
 import com.example.blesdk.bean.function.*;
@@ -37,6 +44,7 @@ import com.example.blesdk.callback.data.*;
 import com.example.blesdk.callback.status.*;
 import com.example.blesdk.utils.BlueToothUtils;
 import com.example.blesdk.utils.BleActivityMode;
+import com.example.blesdk.utils.OpusBinConverter;
 import com.example.blesdk.utils.WorkoutControlType;
 
 import io.flutter.embedding.engine.plugins.FlutterPlugin;
@@ -57,13 +65,19 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
         EventChannel.StreamHandler, ActivityAware {
 
     private static final String TAG = "RwfitBlePlugin";
-    private static final String PLUGIN_VERSION = "0.0.8";
+    private static final String PLUGIN_VERSION = "0.0.9";
 
     private MethodChannel methodChannel;
     private EventChannel eventChannel;
     private EventChannel.EventSink eventSink;
     private Activity activity;
+    private Context applicationContext;
     private final Handler main = new Handler(Looper.getMainLooper());
+
+    // 录音：下载文件落盘用单线程执行器；fileId → 点击下载时刻(秒)，落盘文件名第三段用
+    private ExecutorService recordFileExecutor;
+    // 主线程 put、IO 线程 remove，用 ConcurrentHashMap 保证并发安全
+    private final Map<Long, Long> recordDownloadStartAt = new ConcurrentHashMap<>();
 
     // 实时测量会话状态：SDK 回调线程与主线程都会读写，用 volatile 保证可见性。
     // starting（开始指令已下发、ACK 未回）或 active（ACK 已回、测量中）都视为"有会话"，
@@ -95,6 +109,9 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
 
     @Override
     public void onAttachedToEngine(@NonNull FlutterPluginBinding binding) {
+        applicationContext = binding.getApplicationContext();
+        // 录音文件落盘/Ogg 封装走专用单线程，避免阻塞 BLE 数据线程
+        recordFileExecutor = Executors.newSingleThreadExecutor();
         methodChannel = new MethodChannel(binding.getBinaryMessenger(), "rwfit_ble/methods");
         methodChannel.setMethodCallHandler(this);
         eventChannel = new EventChannel(binding.getBinaryMessenger(), "rwfit_ble/events");
@@ -103,6 +120,11 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
 
     @Override
     public void onDetachedFromEngine(@NonNull FlutterPluginBinding binding) {
+        if (recordFileExecutor != null) {
+            recordFileExecutor.shutdownNow();
+            recordFileExecutor = null;
+        }
+        applicationContext = null;
         disposePersistentCallbacks();
         methodChannel.setMethodCallHandler(null);
         eventChannel.setStreamHandler(null);
@@ -301,11 +323,30 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
                 case "setFallDetect": setFallDetect(call, result); break;
                 case "getCountReminderInterval": getCountReminderInterval(result); break;
                 case "setCountReminderInterval": setCountReminderInterval(call, result); break;
+                case "getSedentaryRemind": getSedentaryRemind(result); break;
+                case "setSedentaryRemind": setSedentaryRemind(call, result); break;
+                case "getDrinkRemind": getDrinkRemind(result); break;
+                case "setDrinkRemind": setDrinkRemind(call, result); break;
                 // ---- 传感器原始数据 ----
                 case "controlSensorRaw": controlSensorRaw(call, result); break;
                 case "getSensorRawHistory": getSensorRawHistory(result); break;
                 // ---- 消息推送（Android 专用）----
                 case "pushMessage": pushMessage(call, result); break;
+                // ---- 录音 ----
+                case "recordControl": recordControl(call, result); break;
+                case "getRecordStatus": getRecordStatus(result); break;
+                case "getRecordFileList": getRecordFileList(result); break;
+                case "getLocalRecordFileList": getLocalRecordFileList(result); break;
+                case "transferRecordFile": transferRecordFile(call, result); break;
+                case "deleteRecordFile": deleteRecordFile(call, result); break;
+                case "formatRecordStorage": formatRecordStorage(result); break;
+                // Android MediaPlayer 原生支持 Ogg Opus，无需转换
+                case "convertOggToWav": {
+                    Map<String, Object> r = success();
+                    r.put("path", s(call, "path"));
+                    result.success(r);
+                    break;
+                }
                 default:
                     result.notImplemented();
             }
@@ -474,10 +515,17 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
             DHBleSdk.INSTANCE.subscribeData(workoutRealtimeCallback);
         }
 
-        // 设备对进入/退出多运动的应答帧即实时数据帧（会被 push 数据冲掉，设备侧问题），
-        // 回调不可靠；两端一致：调用后立即返回成功，数据经 SportDataPushCallback.onResult 推送。
-        DHBleSdk.INSTANCE.setExerciseMore(enabled ? 1 : 0);
-        result.success(success());
+        // SDK 2.260922 修复了设备应答帧不可靠的问题，新增携带 CustomStatusCallback 的重载：
+        // 等 ACK 再回复，失败以错误上抛（iOS 侧 setRingEnterWorkOut 的 block 同样等 ACK）。
+        // 实时数据经 SportDataPushCallback.onResult 推送，与本调用的应答无关。
+        DHBleSdk.INSTANCE.setExerciseMore(enabled ? 1 : 0, new CustomStatusCallback() {
+            @Override public void onSuccess() {
+                result.success(success());
+            }
+            @Override public void onFail(int errorCode) {
+                result.error(errorCode, "setWorkoutRealtimeEnabled failed");
+            }
+        });
     }
 
     private void getWorkoutReports(final Reply result) {
@@ -928,6 +976,246 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
         result.success(success());
     }
 
+    // ==================== 录音（自 yuanfit 桥接移植，SDK 接口一致）====================
+
+    private void recordControl(MethodCall call, final Reply result) {
+        final boolean start = b(call, "start");
+        DHBleSdk.INSTANCE.recordControl(start, new RecordControlCallback() {
+            @Override public void onResult(Integer data) {
+                Map<String, Object> r = success();
+                r.put("result", data != null ? data : 0);
+                result.success(r);
+                DHBleSdk.INSTANCE.dispose(this);
+            }
+            @Override public void onFail(int errorCode) {
+                result.error(errorCode, (start ? "start" : "stop") + " recording failed");
+            }
+            @Override public void onSuccess() {}
+        });
+    }
+
+    private void getRecordStatus(final Reply result) {
+        DHBleSdk.INSTANCE.getRecordStatus(new RecordStatusCallback() {
+            @Override public void onResult(RecordStatusBean data) {
+                if (data == null) {
+                    result.error(-2, "get record status returned no data");
+                    return;
+                }
+                Map<String, Object> r = success();
+                r.put("status", data.getStatus());
+                r.put("recording", data.isRecording());
+                r.put("startTime", data.getStartTime());
+                r.put("duration", data.getDuration());
+                r.put("totalCapacity", data.getTotalCapacity());
+                r.put("remainingCapacity", data.getRemainingCapacity());
+                result.success(r);
+            }
+            @Override public void onFail(int errorCode) {
+                result.error(errorCode, "get record status failed");
+            }
+            @Override public void onSuccess() {}
+        });
+    }
+
+    private void getRecordFileList(final Reply result) {
+        DHBleSdk.INSTANCE.getRecordFileList(new RecordFileListCallback() {
+            @Override public void onResult(List<RecordFileItemBean> data) {
+                List<Map<String, Object>> items = new ArrayList<>();
+                if (data != null) {
+                    for (RecordFileItemBean bean : data) {
+                        if (bean == null) continue;
+                        Map<String, Object> item = new HashMap<>();
+                        item.put("fileId", bean.getFileId());
+                        item.put("fileSize", bean.getFileSize());
+                        item.put("duration", bean.getDuration());
+                        item.put("timestamp", bean.getTimestamp());
+                        items.add(item);
+                    }
+                }
+                Map<String, Object> r = success();
+                r.put("data", items);
+                result.success(r);
+            }
+            @Override public void onFail(int errorCode) {
+                result.error(errorCode, "get record file list failed");
+            }
+            @Override public void onSuccess() {}
+        });
+    }
+
+    private void transferRecordFile(MethodCall call, final Reply result) {
+        final long fileId = l(call, "fileId");
+        // 记录“点击下载”的手机时刻,saveRecordFile 落盘时用作文件名第三段
+        recordDownloadStartAt.put(fileId, System.currentTimeMillis() / 1000L);
+        DHBleSdk.INSTANCE.transferRecordFile(fileId, new RecordFileTransferCallback() {
+            @Override public void onResult(RecordFileTransferBean data) {
+                if (data == null) {
+                    finishRecordTransferWithError(fileId, -2, "record file data unavailable", result);
+                    return;
+                }
+                if (!data.isComplete()) {
+                    fireRecordTransferEvent(data);
+                    return;
+                }
+
+                // 完整原始帧已由 SDK 聚合；在专用 IO 线程转换和落盘，
+                // 避免 Ogg 封装/文件写入阻塞 BLE 数据线程。
+                final byte[] rawData = data.getFileData();
+                final ExecutorService executor = recordFileExecutor;
+                if (rawData == null || executor == null || executor.isShutdown()) {
+                    finishRecordTransferWithError(fileId, -2, "record file data unavailable", result);
+                    return;
+                }
+                executor.execute(() -> {
+                    try {
+                        String filePath = saveRecordFile(data, rawData);
+                        data.setFilePath(filePath);
+                        fireRecordTransferEvent(data);
+                        Map<String, Object> r = success();
+                        r.put("filePath", filePath);
+                        result.success(r);
+                    } catch (Exception e) {
+                        Log.e(TAG, "save record file failed", e);
+                        finishRecordTransferWithError(fileId, -2,
+                                "save record file failed: " + e.getMessage(), result);
+                    }
+                });
+            }
+            @Override public void onFail(int errorCode) {
+                finishRecordTransferWithError(fileId, errorCode,
+                        "transfer record file failed", result);
+            }
+            @Override public void onSuccess() {}
+        });
+    }
+
+    private void getLocalRecordFileList(final Reply result) {
+        // 目录 IO 移出主线程（与 iOS 的串行队列设计对齐）；executor 已随引擎销毁时内联执行
+        Runnable task = () -> {
+            try {
+                File directory = localRecordingDirectory();
+                File[] files = directory.listFiles(File::isFile);
+                if (files == null) files = new File[0];
+                Arrays.sort(files,
+                        (left, right) -> Long.compare(right.lastModified(), left.lastModified()));
+
+                List<Map<String, Object>> items = new ArrayList<>();
+                for (File file : files) {
+                    Map<String, Object> item = new HashMap<>();
+                    item.put("name", file.getName());
+                    item.put("path", file.getAbsolutePath());
+                    item.put("fileSize", file.length());
+                    item.put("lastModified", file.lastModified());
+                    // 文件名格式:{fileId}_{duration}_{downloadAt}.opus
+                    // duration 是 SDK 内部按帧数算的权威录制时长(秒),与 ogg 文件实际时长一致;
+                    // downloadAt 是点击下载时的手机时刻(设备时间不可信,不用 SDK 的)。
+                    String[] parts = file.getName().split("_");
+                    try { item.put("fileId", Long.parseLong(parts[0])); }
+                    catch (NumberFormatException | ArrayIndexOutOfBoundsException ignored) {}
+                    try { item.put("duration", Long.parseLong(parts[1])); }
+                    catch (NumberFormatException | ArrayIndexOutOfBoundsException ignored) {}
+                    items.add(item);
+                }
+                Map<String, Object> response = success();
+                response.put("data", items);
+                result.success(response);
+            } catch (Exception e) {
+                result.error(-2, "list local recordings failed: " + e.getMessage());
+            }
+        };
+        ExecutorService executor = recordFileExecutor;
+        if (executor != null && !executor.isShutdown()) executor.execute(task);
+        else task.run();
+    }
+
+    private Map<String, Object> recordTransferMap(RecordFileTransferBean data) {
+        Map<String, Object> r = new HashMap<>();
+        r.put("fileType", data.getFileType());
+        r.put("duration", data.getDuration());
+        r.put("timestamp", data.getTimestamp());
+        r.put("fileId", data.getFileId());
+        r.put("format", data.getFormat());
+        r.put("fileSize", data.getFileSize());
+        r.put("received", data.getReceived());
+        r.put("progress", data.getProgress());
+        r.put("complete", data.isComplete());
+        r.put("completedAt", data.getCompletedAt());
+        if (data.getFilePath() != null) r.put("filePath", data.getFilePath());
+        return r;
+    }
+
+    private void fireRecordTransferEvent(RecordFileTransferBean data) {
+        JSONObject event = new JSONObject();
+        event.putAll(recordTransferMap(data));
+        fireEvent("rwfit:recordTransfer", event);
+    }
+
+    private void finishRecordTransferWithError(long fileId, int errorCode,
+                                                String message, Reply result) {
+        JSONObject event = new JSONObject();
+        event.put("fileId", fileId);
+        event.put("code", errorCode);
+        fireEvent("rwfit:recordTransfer", event);
+        result.error(errorCode, message);
+    }
+
+    private String saveRecordFile(RecordFileTransferBean data, byte[] rawData) throws Exception {
+        File directory = localRecordingDirectory();
+        if (!directory.exists() && !directory.mkdirs()) {
+            throw new IllegalStateException("cannot create recording directory");
+        }
+
+        // 第三段 = 点击下载时的手机时刻(transferRecordFile 入口记录);
+        // 设备 RTC 不对时,SDK 的 completedAt 不可信,一律不用。兜底:当前时间。
+        Long startAt = recordDownloadStartAt.remove(data.getFileId());
+        long downloadAt = startAt != null ? startAt : System.currentTimeMillis() / 1000L;
+        String fileName = data.getFileId() + "_" + data.getDuration() + "_"
+                + downloadAt + ".opus";
+        File file = new File(directory, fileName);
+        // 设备原始 OPUS 为 16kHz 单通道 40B 定长帧，OpusBinConverter 封装成 Ogg 容器
+        byte[] opusData = OpusBinConverter.convert(rawData);
+        try (FileOutputStream output = new FileOutputStream(file)) {
+            output.write(opusData);
+        }
+        return file.getAbsolutePath();
+    }
+
+    private File localRecordingDirectory() {
+        Context context = applicationContext != null ? applicationContext : activity;
+        if (context == null) throw new IllegalStateException("application context unavailable");
+        File parent = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
+        return new File(parent != null ? parent : context.getFilesDir(), "Recording");
+    }
+
+    private void deleteRecordFile(MethodCall call, final Reply result) {
+        final long fileId = l(call, "fileId");
+        DHBleSdk.INSTANCE.deleteRecordFile(fileId, new RecordFileDeleteCallback() {
+            @Override public void onResult(Integer data) {
+                Map<String, Object> r = success();
+                r.put("result", data != null ? data : 0);
+                result.success(r);
+            }
+            @Override public void onFail(int errorCode) {
+                result.error(errorCode, "delete record file failed");
+            }
+            @Override public void onSuccess() {}
+        });
+    }
+
+    private void formatRecordStorage(final Reply result) {
+        DHBleSdk.INSTANCE.formatRecordStorage(new RecordFormatCallback() {
+            @Override public void onResult(Integer data) {
+                Map<String, Object> r = success();
+                r.put("result", data != null ? data : 0);
+                result.success(r);
+            }
+            @Override public void onFail(int errorCode) {
+                result.error(errorCode, "format record storage failed");
+            }
+            @Override public void onSuccess() {}
+        });
+    }
+
     private void unbind(final Reply result) {
         DHBleSdk.INSTANCE.subscribeStatus(new CommonStatusCallback() {
             @Override public void onSuccess(int msgId) {
@@ -1023,6 +1311,8 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
         menu.put("isSupportSensorRawSleep", bean.isSupportSensorRawSleep());
         menu.put("isSupportFallDetect", bean.isSupportFallDetect());
         menu.put("isSupportRecording", bean.isSupportRecording());
+        menu.put("isSupportSedentary", bean.isSupportSedentary());
+        menu.put("isDrink", bean.isDrink());
         menu.put("isFindDevice", bean.isFindDevice());
         menu.put("isTakePhoto", bean.isTakePhoto());
         menu.put("isLedLight", bean.isLEDLight());
@@ -1538,6 +1828,67 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
         DHBleSdk.INSTANCE.setCountReminderInterval(i(call, "intervalMinutes"));
     }
 
+    // ---- 久坐 / 喝水提醒（时段真实可配置，区别于全天检测的固定 00:00–23:59）----
+
+    private void getSedentaryRemind(final Reply result) {
+        DHBleSdk.INSTANCE.getSedentaryRemind(new ReminderSettingCallback() {
+            @Override public void onResult(DrinkReminderBean d) { reminderReply(result, d); }
+            @Override public void onFail(int e) { result.error(e, "getSedentaryRemind failed"); }
+            @Override public void onSuccess() {}
+        });
+    }
+
+    private void setSedentaryRemind(MethodCall call, final Reply result) {
+        DHBleSdk.INSTANCE.setSedentaryRemind(reminderBean(call), new ReminderSettingCallback() {
+            @Override public void onResult(DrinkReminderBean d) {}
+            @Override public void onFail(int e) { result.error(e, "setSedentaryRemind failed"); }
+            @Override public void onSuccess() { result.success(success()); }
+        });
+    }
+
+    private void getDrinkRemind(final Reply result) {
+        DHBleSdk.INSTANCE.getDrinkRemind(new ReminderSettingCallback() {
+            @Override public void onResult(DrinkReminderBean d) { reminderReply(result, d); }
+            @Override public void onFail(int e) { result.error(e, "getDrinkRemind failed"); }
+            @Override public void onSuccess() {}
+        });
+    }
+
+    private void setDrinkRemind(MethodCall call, final Reply result) {
+        DHBleSdk.INSTANCE.setDrinkRemind(reminderBean(call), new ReminderSettingCallback() {
+            @Override public void onResult(DrinkReminderBean d) {}
+            @Override public void onFail(int e) { result.error(e, "setDrinkRemind failed"); }
+            @Override public void onSuccess() { result.success(success()); }
+        });
+    }
+
+    /** 久坐/喝水提醒入参：时段真实下发，不强制 00:00–23:59。 */
+    private DrinkReminderBean reminderBean(MethodCall call) {
+        DrinkReminderBean bean = new DrinkReminderBean();
+        bean.setOpen(b(call, "isOpen"));
+        bean.setStartHour(i(call, "startHour"));
+        bean.setStartMin(i(call, "startMin"));
+        bean.setEndHour(i(call, "endHour"));
+        bean.setEndMin(i(call, "endMin"));
+        bean.setRemindDuration(i(call, "intervalMinutes"));
+        return bean;
+    }
+
+    private void reminderReply(Reply result, DrinkReminderBean d) {
+        if (d == null) {
+            result.error(-2, "reminder returned no data");
+            return;
+        }
+        Map<String, Object> r = success();
+        r.put("isOpen", d.isOpen());
+        r.put("startHour", d.getStartHour());
+        r.put("startMin", d.getStartMin());
+        r.put("endHour", d.getEndHour());
+        r.put("endMin", d.getEndMin());
+        r.put("intervalMinutes", d.getRemindDuration());
+        result.success(r);
+    }
+
     private void controlSensorRaw(MethodCall call, final Reply result) {
         registerPersistentCallbacks();
         DHBleSdk.INSTANCE.subscribeData(new SensorRawControlCallback() {
@@ -1729,6 +2080,30 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
                         event.put("dataValue", item.getCount());
                         event.put("time", item.getTimeMills());
                         fireEvent("rwfit:healthData", event);
+                        return;
+                    }
+                    if (data.getType() == DevicePushType.RECORD_STATUS) {
+                        // 录音状态实时推送（iOS 无对应推送，App 层轮询 getRecordStatus 兜底）
+                        if (!(data.getValue() instanceof RecordStatusBean)) return;
+                        RecordStatusBean status = (RecordStatusBean) data.getValue();
+                        JSONObject event = new JSONObject();
+                        event.put("status", status.getStatus());
+                        event.put("recording", status.isRecording());
+                        event.put("startTime", status.getStartTime());
+                        event.put("duration", status.getDuration());
+                        event.put("totalCapacity", status.getTotalCapacity());
+                        event.put("remainingCapacity", status.getRemainingCapacity());
+                        fireEvent("rwfit:recordStatus", event);
+                        return;
+                    }
+                    if (data.getType() == DevicePushType.POWER) {
+                        // 电量与充电状态推送（与 getPower 查询同实体；powerStatus 1=充电中）
+                        if (!(data.getValue() instanceof PowerBean)) return;
+                        PowerBean bean = (PowerBean) data.getValue();
+                        JSONObject event = new JSONObject();
+                        event.put("power", bean.getPower());
+                        event.put("charging", bean.getPowerStatus() == 1);
+                        fireEvent("rwfit:batteryChanged", event);
                     }
                 }
             };
