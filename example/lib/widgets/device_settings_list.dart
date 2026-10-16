@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:rwfit_ble/rwfit_ble.dart';
 
 import '../demo_controller.dart';
@@ -140,6 +141,58 @@ class _DeviceSettingsListState extends State<DeviceSettingsList> {
     );
   }
 
+  Future<void> _showCustomNumber() async {
+    final generation = widget.controller.connectionGeneration;
+    var input = '1234';
+    final number = await showDialog<int>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(demoTr('自定义数字显示', 'Custom number display')),
+        content: TextFormField(
+          initialValue: input,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          maxLength: 4,
+          decoration: InputDecoration(
+            labelText: demoTr('数字（0–9999）', 'Number (0–9999)'),
+            helperText: demoTr(
+              '显示 3 秒，再次发送重新计时',
+              'Shown for 3 seconds; send again to restart',
+            ),
+          ),
+          onChanged: (value) => input = value,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(demoTr('取消', 'Cancel')),
+          ),
+          TextButton(
+            onPressed: () {
+              final value = int.tryParse(input);
+              if (value != null && value >= 0 && value <= 9999) {
+                Navigator.pop(context, value);
+              }
+            },
+            child: Text(demoTr('发送', 'Send')),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || number == null) return;
+    if (generation != widget.controller.connectionGeneration ||
+        !widget.controller.connected) {
+      _toast(demoTr('连接已变化，请重试', 'Connection changed; please retry'));
+      return;
+    }
+    await _ring.showCustomNumber(number);
+    if (!mounted || generation != widget.controller.connectionGeneration) {
+      return;
+    }
+    _saved(_FeatureId.customNumber, '$number');
+  }
+
   Future<void> _tapSetting(_FeatureSpec setting) async {
     if (!widget.controller.connected) {
       _toast(demoTr('请先连接设备', 'Connect the device first'));
@@ -148,6 +201,7 @@ class _DeviceSettingsListState extends State<DeviceSettingsList> {
     setState(() => _busyIds.add(setting.id));
     try {
       await switch (setting.id) {
+        _FeatureId.customNumber => _showCustomNumber(),
         _FeatureId.alarm => _manageAlarm(),
         _FeatureId.userInfo => _setDemoUserInfo(),
         _FeatureId.timeFormat => _configureTimeFormat(),
@@ -983,25 +1037,7 @@ class _DeviceSettingsListState extends State<DeviceSettingsList> {
     required String confirmText,
   }) async {
     if (!mounted) return false;
-    return await showDialog<bool>(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: Text(title),
-            content: Text(content),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: Text(demoTr('取消', 'Cancel')),
-              ),
-              TextButton(
-                style: TextButton.styleFrom(foregroundColor: DemoColors.danger),
-                onPressed: () => Navigator.pop(context, true),
-                child: Text(confirmText),
-              ),
-            ],
-          ),
-        ) ??
-        false;
+    return demoConfirm(context, title, content, confirmText: confirmText);
   }
 
   Future<String?> _editTime() async {
@@ -1032,6 +1068,15 @@ class _DeviceSettingsListState extends State<DeviceSettingsList> {
   }
 
   List<_FeatureSpec> _supportedSettings(DemoCapabilities capabilities) => [
+    if (capabilities.has(DemoCapabilityKey.customNumberDisplay))
+      _FeatureSpec(
+        id: _FeatureId.customNumber,
+        title: demoTr('自定义数字显示', 'Custom number display'),
+        subtitle: demoTr(
+          '输入 0–9999，显示 3 秒',
+          'Enter 0–9999; display for 3 seconds',
+        ),
+      ),
     _FeatureSpec(
       id: _FeatureId.userInfo,
       title: demoTr('用户信息', 'User profile'),
@@ -1261,6 +1306,7 @@ class _FeatureSpec {
 }
 
 abstract final class _FeatureId {
+  static const customNumber = 'customNumber';
   static const userInfo = 'userInfo';
   static const timeFormat = 'timeFormat';
   static const alarm = 'alarm';

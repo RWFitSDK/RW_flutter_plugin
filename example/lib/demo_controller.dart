@@ -20,6 +20,13 @@ class DemoController extends ChangeNotifier {
   final List<Completer<void>> _readyWaiters = [];
   final Set<String> _receivedSyncTypes = {};
   Completer<void>? _syncWaiter;
+  int _connectionGeneration = 0;
+  bool _disposed = false;
+  Future<void>? _infoRefresh;
+  int? _infoRefreshGeneration;
+
+  /// 同一设备重连也属于新会话，异步查询不得写回上一次连接的结果。
+  int get connectionGeneration => _connectionGeneration;
 
   BleDevice? device;
   DemoCapabilities capabilities = const DemoCapabilities.empty();
@@ -30,6 +37,8 @@ class DemoController extends ChangeNotifier {
   double syncProgress = 0;
   int? powerLevel;
   FirmwareInfo? firmware;
+  String? macAddress;
+  String? deviceInfoError;
   String? sdkVersion;
   String? pluginVersion;
   DateTime? lastSyncAt;
@@ -39,12 +48,25 @@ class DemoController extends ChangeNotifier {
 
   bool get connected => ready && connectionState == ConnectState.connected;
 
-  String? get deviceId => device == null ? null : (device!.uuid ?? device!.mac);
+  static String? _identity(String? uuid, String? mac) {
+    final value = uuid?.isNotEmpty == true ? uuid : mac;
+    return value?.isNotEmpty == true ? value!.toUpperCase() : null;
+  }
+
+  String? get deviceId => _identity(device?.uuid, device?.mac);
+
+  bool _isCurrentSession(int generation) =>
+      !_disposed && connected && generation == _connectionGeneration;
 
   void _subscribe() {
     _subscriptions.add(
       ring.onConnectState.listen((event) {
+        if (_disposed) return;
         connectionState = event.state;
+        if (event.state != ConnectState.connected) {
+          _connectionGeneration++;
+          ready = false;
+        }
         if (event.state == ConnectState.disconnected ||
             event.state == ConnectState.failed) {
           ready = false;
@@ -67,36 +89,7 @@ class DemoController extends ChangeNotifier {
         notifyListeners();
       }),
     );
-    _subscriptions.add(
-      ring.onFunctionMenu.listen((menu) async {
-        final connectedDevice = BleDevice(
-          name: menu.name,
-          mac: menu.mac,
-          rssi: 0,
-          uuid: menu.uuid,
-        );
-        final previousId = deviceId;
-        device = connectedDevice;
-        capabilities = DemoCapabilities(
-          Map<String, dynamic>.unmodifiable(menu.raw),
-        );
-        connectionState = ConnectState.connected;
-        ready = true;
-        lastError = null;
-        await DeviceStore.save(connectedDevice);
-        await DeviceStore.saveCapabilities(menu.raw);
-        await ring.iosSetBindedStatus(true);
-        if (previousId != deviceId) {
-          _realtimeRecords.clear();
-          healthRecords = {};
-          lastSyncAt = null;
-          await DeviceStore.clearLastSyncAt();
-        }
-        _completeReadyWaiters();
-        notifyListeners();
-        unawaited(refreshDeviceInfo(silent: true));
-      }),
-    );
+    _subscriptions.add(ring.onFunctionMenu.listen(_handleFunctionMenu));
     _subscriptions.add(
       ring.onSyncResult.listen((result) {
         final parsed = DemoHealthStore.parseSyncResult(result);
@@ -120,14 +113,22 @@ class DemoController extends ChangeNotifier {
     );
     _subscriptions.add(
       ring.onSyncFinish.listen((_) async {
+        if (_disposed || !connected || !syncing) return;
+        final generation = _connectionGeneration;
         syncing = false;
         syncProgress = 1;
         lastSyncAt = DateTime.now();
-        await DeviceStore.saveLastSyncAt(lastSyncAt!);
         final waiter = _syncWaiter;
         _syncWaiter = null;
         if (waiter != null && !waiter.isCompleted) waiter.complete();
         notifyListeners();
+        try {
+          await DeviceStore.saveLastSyncAt(lastSyncAt!);
+        } catch (error) {
+          if (!_isCurrentSession(generation)) return;
+          lastError = '$error';
+          notifyListeners();
+        }
       }),
     );
     _subscriptions.add(
@@ -147,6 +148,74 @@ class DemoController extends ChangeNotifier {
     );
   }
 
+  Future<void> _handleFunctionMenu(FunctionMenu menu) async {
+    if (_disposed) return;
+    final incomingId = _identity(menu.uuid, menu.mac);
+    try {
+      final previousDevice = device;
+      final changedDevice = deviceId != incomingId;
+      final mac = menu.mac.isNotEmpty
+          ? menu.mac
+          : (!changedDevice ? previousDevice?.mac ?? '' : '');
+      final uuid = menu.uuid?.isNotEmpty == true ? menu.uuid : null;
+      final unchanged =
+          !changedDevice &&
+          previousDevice != null &&
+          previousDevice.name == menu.name &&
+          previousDevice.mac == mac &&
+          previousDevice.uuid == uuid;
+      if (!connected || changedDevice) _connectionGeneration++;
+      device = unchanged
+          ? previousDevice
+          : BleDevice(name: menu.name, mac: mac, rssi: 0, uuid: uuid);
+      macAddress = mac.isEmpty ? null : mac;
+      deviceInfoError = null;
+      capabilities = DemoCapabilities(
+        Map<String, dynamic>.unmodifiable(menu.raw),
+      );
+      connectionState = ConnectState.connected;
+      ready = true;
+      lastError = null;
+      if (changedDevice) {
+        _failSyncWaiter(StateError('Device changed during sync'));
+        _realtimeRecords.clear();
+        healthRecords = {};
+        lastSyncAt = null;
+        powerLevel = null;
+        firmware = null;
+      }
+      _completeReadyWaiters();
+      notifyListeners();
+      // 收到功能表后按原有方式分项保存，不因同一设备断连而中断保存。
+      final connectedDevice = device!;
+      try {
+        await DeviceStore.save(connectedDevice);
+        await DeviceStore.saveCapabilities(menu.raw);
+        if (changedDevice) await DeviceStore.clearLastSyncAt();
+        await ring.iosSetBindedStatus(true);
+      } catch (error) {
+        if (_disposed || deviceId != incomingId) return;
+        lastError = '$error';
+        notifyListeners();
+      }
+      if (!_disposed && connected && deviceId == incomingId) {
+        unawaited(refreshDeviceInfo(silent: true));
+      }
+    } catch (error) {
+      if (_disposed) return;
+      lastError = '$error';
+      notifyListeners();
+    }
+  }
+
+  /// 确认当前设备就绪后调用，命令排队和超时由 SDK 处理。
+  Future<T> runDeviceCommand<T>(Future<T> Function() command) async {
+    if (!_isCurrentSession(_connectionGeneration)) {
+      throw RwfitException(-1, 'device session changed');
+    }
+    return command();
+  }
+
   static const _syncTypes = <String>{
     HealthTypeId.step,
     HealthTypeId.sleep,
@@ -161,15 +230,26 @@ class DemoController extends ChangeNotifier {
   };
 
   Future<void> _loadSavedState() async {
-    final savedDevice = await DeviceStore.load();
-    final savedCapabilities = await DeviceStore.loadCapabilities();
-    final savedLastSyncAt = await DeviceStore.loadLastSyncAt();
-    if (!ready) {
-      device = savedDevice;
-      capabilities = DemoCapabilities(savedCapabilities);
-      lastSyncAt = savedLastSyncAt;
-      healthRecords = {};
+    final generation = _connectionGeneration;
+    try {
+      final savedDevice = await DeviceStore.load();
+      final savedCapabilities = await DeviceStore.loadCapabilities();
+      final savedLastSyncAt = await DeviceStore.loadLastSyncAt();
+      if (_disposed) return;
+      if (!ready && generation == _connectionGeneration && device == null) {
+        device = savedDevice;
+        macAddress = savedDevice?.mac.isNotEmpty == true
+            ? savedDevice!.mac
+            : null;
+        capabilities = DemoCapabilities(savedCapabilities);
+        lastSyncAt = savedLastSyncAt;
+        healthRecords = {};
+      }
+    } catch (error) {
+      if (_disposed) return;
+      lastError = '$error';
     }
+    if (_disposed) return;
     loadingSavedState = false;
     notifyListeners();
   }
@@ -180,6 +260,7 @@ class DemoController extends ChangeNotifier {
         ring.getSdkVersion(),
         ring.getPluginVersion(),
       ]);
+      if (_disposed) return;
       sdkVersion = values[0];
       pluginVersion = values[1];
       notifyListeners();
@@ -232,47 +313,75 @@ class DemoController extends ChangeNotifier {
   }
 
   Future<void> reconnect() async {
+    if (_disposed) throw StateError('Demo controller disposed');
     final savedDevice = device;
     if (savedDevice == null) throw StateError('No saved device');
     if (connected || await ring.isConnected()) {
       if (ready) return;
     }
+    if (_disposed) throw StateError('Demo controller disposed');
     connectionState = ConnectState.connecting;
+    _connectionGeneration++;
+    ready = false;
     lastError = null;
     notifyListeners();
     final waiter = Completer<void>();
     _readyWaiters.add(waiter);
     try {
-      await ring.iosSetBindedStatus(true);
-      await ring.reconnect(savedDevice);
-      await waiter.future.timeout(const Duration(seconds: 20));
+      await Future.wait<void>([
+        () async {
+          await ring.iosSetBindedStatus(true);
+          if (_disposed) return;
+          await ring.reconnect(savedDevice);
+        }(),
+        waiter.future.timeout(const Duration(seconds: 20)),
+      ], eagerError: true);
+    } catch (error) {
+      if (!_disposed && !connected) {
+        connectionState = ConnectState.failed;
+        lastError = '$error';
+        notifyListeners();
+      }
+      rethrow;
     } finally {
       _readyWaiters.remove(waiter);
     }
   }
 
-  Future<void> disconnect() async {
-    await ring.disconnect();
+  void _closeConnection() {
+    _connectionGeneration++;
     ready = false;
     connectionState = ConnectState.disconnected;
     _realtimeRecords.clear();
+    _completeReadyWaiters(StateError('Connection closed'));
+    _failSyncWaiter(StateError('Connection closed during sync'));
     notifyListeners();
   }
 
+  Future<void> disconnect() async {
+    await ring.disconnect();
+    if (!_disposed) _closeConnection();
+  }
+
   Future<void> unbind() async {
+    final unboundId = deviceId;
     await ring.unbind();
-    await ring.iosSetBindedStatus(false);
-    await DeviceStore.clear();
+    if (_disposed || deviceId != unboundId) return;
+    _closeConnection();
     device = null;
     capabilities = const DemoCapabilities.empty();
     healthRecords = {};
-    _realtimeRecords.clear();
     firmware = null;
     powerLevel = null;
-    ready = false;
-    connectionState = ConnectState.disconnected;
+    macAddress = null;
+    deviceInfoError = null;
     lastSyncAt = null;
     notifyListeners();
+    try {
+      await ring.iosSetBindedStatus(false);
+    } finally {
+      await DeviceStore.clear();
+    }
   }
 
   Future<void> syncAllHealthData() async {
@@ -282,6 +391,8 @@ class DemoController extends ChangeNotifier {
       return;
     }
     if (!connected) await reconnect();
+    if (_disposed) throw StateError('Demo controller disposed');
+    final generation = _connectionGeneration;
     syncing = true;
     syncProgress = 0.05;
     healthRecords = {};
@@ -291,32 +402,83 @@ class DemoController extends ChangeNotifier {
     _syncWaiter = waiter;
     notifyListeners();
     try {
-      await ring.syncAllHealthData();
-      await waiter.future.timeout(const Duration(minutes: 3));
+      await Future.wait<void>([
+        ring.syncAllHealthData(),
+        waiter.future.timeout(const Duration(minutes: 3)),
+      ], eagerError: true);
     } catch (_) {
-      syncing = false;
-      if (identical(_syncWaiter, waiter)) _syncWaiter = null;
-      notifyListeners();
+      if (!_disposed && generation == _connectionGeneration) {
+        syncing = false;
+        if (identical(_syncWaiter, waiter)) _syncWaiter = null;
+        notifyListeners();
+      }
       rethrow;
     }
   }
 
   Future<void> refreshDeviceInfo({bool silent = false}) async {
-    if (!connected) {
+    if (_disposed || !connected) {
       if (silent) return;
       throw StateError('Device is not connected');
     }
-    try {
-      final values = await Future.wait<Object>([
-        ring.getPower(),
-        ring.getFirmwareVersion(),
-      ]);
-      powerLevel = values[0] as int;
-      firmware = values[1] as FirmwareInfo;
-      notifyListeners();
-    } catch (_) {
-      if (!silent) rethrow;
+    final generation = _connectionGeneration;
+    var task = _infoRefresh;
+    if (task == null || _infoRefreshGeneration != generation) {
+      task = _refreshDeviceInfo(generation);
+      _infoRefresh = task;
+      _infoRefreshGeneration = generation;
     }
+    try {
+      await task;
+    } catch (error) {
+      if (_isCurrentSession(generation)) {
+        deviceInfoError = '$error';
+        lastError = '$error';
+        notifyListeners();
+      }
+      if (!silent) rethrow;
+    } finally {
+      if (identical(_infoRefresh, task)) _infoRefresh = null;
+    }
+  }
+
+  Future<void> _refreshDeviceInfo(int generation) async {
+    // SDK 已有串行队列，Demo 可同时提交，分别应用成功的查询结果。
+    await Future.wait<void>([
+      () async {
+        final power = await runDeviceCommand(ring.getPower);
+        if (!_isCurrentSession(generation)) return;
+        powerLevel = power;
+        notifyListeners();
+      }(),
+      () async {
+        final version = await runDeviceCommand(ring.getFirmwareVersion);
+        if (!_isCurrentSession(generation)) return;
+        firmware = version;
+        notifyListeners();
+      }(),
+      () async {
+        final mac = await runDeviceCommand(ring.getMacAddress);
+        if (!_isCurrentSession(generation)) return;
+        final currentDevice = device;
+        final changed =
+            mac.isNotEmpty && currentDevice != null && mac != currentDevice.mac;
+        if (mac.isNotEmpty) macAddress = mac;
+        if (changed) {
+          device = BleDevice(
+            name: currentDevice.name,
+            mac: mac,
+            rssi: currentDevice.rssi,
+            uuid: currentDevice.uuid,
+          );
+        }
+        notifyListeners();
+        if (changed) await DeviceStore.save(device!);
+      }(),
+    ]);
+    if (!_isCurrentSession(generation)) return;
+    deviceInfoError = null;
+    notifyListeners();
   }
 
   void _completeReadyWaiters([Object? error]) {
@@ -350,6 +512,9 @@ class DemoController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
+    _connectionGeneration++;
+    ready = false;
     unawaited(_removeHealthDataCallback());
     for (final subscription in _subscriptions) {
       subscription.cancel();

@@ -35,6 +35,7 @@ public class RWFitCallbackManager implements ScanDeviceCallback,
 
     private EventChannel.EventSink sink;
     private RwfitBlePlugin plugin; // 用于 functionMenu 就绪后自动启用音乐控制
+    private volatile String connectedMac = "";
     private final Handler main = new Handler(Looper.getMainLooper());
 
     private RWFitCallbackManager() {
@@ -53,6 +54,14 @@ public class RWFitCallbackManager implements ScanDeviceCallback,
 
     public void setPlugin(RwfitBlePlugin plugin) {
         this.plugin = plugin;
+    }
+
+    String getConnectedMac() { return connectedMac; }
+
+    void clearConnectedMac() { connectedMac = ""; }
+
+    private void cacheConnectedMac(BleDevice device) {
+        connectedMac = device != null && device.getBleMac() != null ? device.getBleMac() : "";
     }
 
     /** 统一事件转发：补 event 字段 → toCodecSafe → 主线程回 sink。 */
@@ -102,6 +111,7 @@ public class RWFitCallbackManager implements ScanDeviceCallback,
 
     @Override
     public void onRingConnected(BleDevice device) {
+        cacheConnectedMac(device);
         JSONObject data = new JSONObject();
         data.put("state", "connected");
         if (device != null) {
@@ -113,6 +123,7 @@ public class RWFitCallbackManager implements ScanDeviceCallback,
 
     @Override
     public void onRingConnectFailed(BleDevice device, RingBleError reason) {
+        clearConnectedMac();
         JSONObject data = new JSONObject();
         data.put("state", "failed");
         data.put("reason", reason != null ? reason.name() : "unknown");
@@ -125,6 +136,7 @@ public class RWFitCallbackManager implements ScanDeviceCallback,
 
     @Override
     public void onRingDidFunctionMenu(BleDevice device, SupportMenuBean supportMenuBean) {
+        cacheConnectedMac(device);
         JSONObject data = new JSONObject();
         data.put("state", "ready");
         if (device != null) {

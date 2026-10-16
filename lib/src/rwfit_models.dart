@@ -91,6 +91,8 @@ class FunctionMenu {
   bool get supportsWorkout => raw['isSupportWorkout'] == true;
   bool get isSupportRecording => raw['isSupportRecording'] == true;
   bool get isSupportSedentary => raw['isSupportSedentary'] == true;
+  bool get isSupportCustomNumberDisplay =>
+      raw['isSupportCustomNumberDisplay'] == true;
   bool get isDrink => raw['isDrink'] == true;
 }
 
@@ -929,6 +931,8 @@ class LocalRecordFile {
   final String name;
   final String path;
   final int fileSize;
+
+  /// 文件最后修改时间（毫秒，两端原生均为 File.lastModified 口径）。
   final int lastModified;
 
   /// 文件名第一段 `{fileId}_{duration}_{downloadAt}.opus`；null 表示解析失败。

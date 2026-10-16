@@ -79,6 +79,18 @@ class RwfitBle {
   Future<FirmwareInfo> getFirmwareVersion() async =>
       FirmwareInfo.fromMap(await callAsync('getFirmwareVersion'));
 
+  /// 设备就绪（收到 [onFunctionMenu]）后获取 MAC，如 `FF:FF:FF:FF:FF:FF`。
+  /// Android 返回插件保存的设备地址；iOS 通过 SDK 指令读取。
+  /// SDK 返回失败或地址为空时抛 [RwfitException]；本地持久化由 App 负责。
+  Future<String> getMacAddress() async =>
+      (await callAsync('ringGetMacAddress'))['mac'] as String;
+
+  /// 显示自定义数字 3 秒，再次调用更新数字并重新计时。
+  /// 需 [FunctionMenu.isSupportCustomNumberDisplay]；数字限制在 0–9999。
+  /// 等待 SDK 操作结果，失败抛 [RwfitException]。
+  Future<void> showCustomNumber(int number) =>
+      callAsync('showCustomNumber', {'number': number.clamp(0, 9999)});
+
   Future<void> setUserInfo(UserInfo info) =>
       callAsync('setUserInfo', info.toMap());
 
@@ -508,9 +520,9 @@ class RwfitBle {
   Future<int> formatRecordStorage() async =>
       (await callAsync('formatRecordStorage'))['result'] as int;
 
-  /// 播放前置转换：iOS 上把 Ogg Opus 转成 16bit PCM WAV（AVFoundation 不认
-  /// Ogg 容器），返回新文件路径；Android 的 MediaPlayer 原生支持 Ogg Opus，
-  /// 原样返回入参路径。
+  /// Android 原样返回文件路径，不进行转换。
+  /// iOS 不支持转换，非空路径调用抛出 code=-2 的 [RwfitException]。
+  /// 播放录音请使用支持 Ogg Opus 的播放器。
   Future<String> convertOggToWav(String path) async =>
       (await callAsync('convertOggToWav', {'path': path}))['path'] as String;
 }

@@ -7,9 +7,11 @@ import '../demo_theme.dart';
 import '../health_metadata.dart';
 import '../health_store.dart';
 import '../i18n.dart';
+import '../support_menu.dart';
 import '../widgets/device_card.dart';
 import 'device_page.dart';
 import 'health_history_page.dart';
+import 'record_page.dart';
 import 'scan_page.dart';
 import 'workout_page.dart';
 
@@ -152,7 +154,16 @@ class _HomeDashboard extends StatelessWidget {
                     ),
                   ),
                 if (device == null)
-                  _unboundCard(context)
+                  _featureEntry(
+                    context,
+                    icon: Icons.add,
+                    title: demoTr('未绑定设备', 'No bound device'),
+                    subtitle: demoTr(
+                      '点击搜索并连接 RW 智能戒指',
+                      'Search for and connect an RW smart ring',
+                    ),
+                    onTap: openScan,
+                  )
                 else
                   DemoDeviceCard(
                     device: device,
@@ -198,6 +209,36 @@ class _HomeDashboard extends StatelessWidget {
                   )
                 else
                   _healthGrid(context, supported),
+                // 按功能表展示的功能入口（录音等非健康类能力）。
+                if (controller.capabilities.has(
+                  DemoCapabilityKey.recording,
+                )) ...[
+                  SectionHeading(demoTr('设备功能', 'Device features')),
+                  _featureEntry(
+                    context,
+                    icon: Icons.graphic_eq,
+                    title: demoTr('录音', 'Recording'),
+                    subtitle: demoTr(
+                      '设备录音、文件下载与管理',
+                      'Device recording, download and file management',
+                    ),
+                    onTap: () {
+                      if (!controller.connected) {
+                        _toast(
+                          context,
+                          demoTr('请先连接设备', 'Connect the device first'),
+                        );
+                        return;
+                      }
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => RecordPage(controller: controller),
+                        ),
+                      );
+                    },
+                  ),
+                ],
               ],
             ),
           ),
@@ -206,10 +247,16 @@ class _HomeDashboard extends StatelessWidget {
     );
   }
 
-  Widget _unboundCard(BuildContext context) => Card(
+  Widget _featureEntry(
+    BuildContext context, {
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) => Card(
     child: InkWell(
       borderRadius: BorderRadius.circular(18),
-      onTap: openScan,
+      onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.all(18),
         child: Row(
@@ -221,7 +268,7 @@ class _HomeDashboard extends StatelessWidget {
                 shape: BoxShape.circle,
                 color: Color(0xFFE4F4ED),
               ),
-              child: const Icon(Icons.add, color: DemoColors.primary),
+              child: Icon(icon, color: DemoColors.primary),
             ),
             const SizedBox(width: 14),
             Expanded(
@@ -229,15 +276,12 @@ class _HomeDashboard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    demoTr('未绑定设备', 'No bound device'),
+                    title,
                     style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
                   const SizedBox(height: 5),
                   Text(
-                    demoTr(
-                      '点击搜索并连接 RW 智能戒指',
-                      'Search for and connect an RW smart ring',
-                    ),
+                    subtitle,
                     style: const TextStyle(color: DemoColors.secondaryText),
                   ),
                 ],

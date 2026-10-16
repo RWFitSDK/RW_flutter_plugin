@@ -150,6 +150,19 @@ class DevicePage extends StatelessWidget {
           ),
           const Divider(height: 1, indent: 16),
           _InfoTile(
+            title: demoTr('蓝牙地址', 'Bluetooth MAC'),
+            subtitle: controller.deviceInfoError == null
+                ? demoTr('点击刷新设备信息', 'Tap to refresh device information')
+                : demoTr('获取失败，点击重试', 'Read failed. Tap to retry'),
+            onTap: controller.connected
+                ? () => _run(context, controller.refreshDeviceInfo)
+                : null,
+            value: controller.macAddress?.isNotEmpty == true
+                ? controller.macAddress!
+                : '--',
+          ),
+          const Divider(height: 1, indent: 16),
+          _InfoTile(
             title: demoTr('SDK 版本', 'SDK version'),
             value: controller.sdkVersion ?? '--',
           ),
@@ -178,28 +191,14 @@ class DevicePage extends StatelessWidget {
   }
 
   Future<void> _confirmUnbind(BuildContext context) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(demoTr('解除绑定', 'Unbind device')),
-        content: Text(
-          demoTr(
-            '解除后将同时清除 Demo 当前显示的健康记录。',
-            'This also clears health records currently shown in the Demo.',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text(demoTr('取消', 'Cancel')),
-          ),
-          TextButton(
-            style: TextButton.styleFrom(foregroundColor: DemoColors.danger),
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(demoTr('解除', 'Unbind')),
-          ),
-        ],
+    final confirmed = await demoConfirm(
+      context,
+      demoTr('解除绑定', 'Unbind device'),
+      demoTr(
+        '解除后将同时清除 Demo 当前显示的健康记录。',
+        'This also clears health records currently shown in the demo.',
       ),
+      confirmText: demoTr('解除', 'Unbind'),
     );
     if (confirmed != true || !context.mounted) return;
     try {

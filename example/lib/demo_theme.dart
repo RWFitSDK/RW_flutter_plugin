@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'i18n.dart';
+
 abstract final class DemoColors {
   static const background = Color(0xFFF4F7F5);
   static const primary = Color(0xFF0C9B6C);
@@ -120,4 +122,35 @@ class DemoEmptyCard extends StatelessWidget {
       ),
     ),
   );
+}
+
+/// 全 demo 共用的确认弹窗；危险操作（删除/格式化等）用 [danger] 标红确认键。
+Future<bool> demoConfirm(
+  BuildContext context,
+  String title,
+  String message, {
+  String? confirmText,
+  bool danger = true,
+}) async {
+  return await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(title),
+          content: Text(message),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text(demoTr('取消', 'Cancel')),
+            ),
+            TextButton(
+              style: danger
+                  ? TextButton.styleFrom(foregroundColor: DemoColors.danger)
+                  : null,
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(confirmText ?? demoTr('确认', 'Confirm')),
+            ),
+          ],
+        ),
+      ) ??
+      false;
 }

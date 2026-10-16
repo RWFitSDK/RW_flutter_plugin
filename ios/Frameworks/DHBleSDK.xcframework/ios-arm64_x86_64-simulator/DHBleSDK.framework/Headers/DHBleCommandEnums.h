@@ -285,6 +285,8 @@ typedef enum : UInt16 {
      BLE_KEY_APP_CONTROL_COUNT = 0x0610,//APP控制戒指在线进入念珠模式, 2字节目标值+2字节初始值(小端)
      BLE_KEY_COUPLE_INTERACTION = 0x0611, //情侣功能互动
      BLE_KEY_APP_FOREGROUND_BACKGROUND = 0x0612, //app进前后台 1 前台 2后台; 实时更新步数等需要.
+     BLE_KEY_APP_VIBRATION_CONTROL = 0x0613, //自定义震动控制(协议2.3.3), 5字节: 次数/强度/循环组数/组内频率/组间停顿
+     BLE_KEY_CUSTOM_NUMBER_DISPLAY = 0x0614, //自定义数字显示, 2字节小端UInt16, 范围0-9999
 
      // TEST
      BLE_KEY_FACTORYTEST = 0x0A0A, // 工厂测试与校正
@@ -319,7 +321,7 @@ typedef enum : UInt16 {
 typedef enum : UInt16 {
     DHDevicePushTypePower = BLE_KEY_POWER,
     DHDevicePushTypeRecordStatus = BLE_KEY_RECORD_STATUS,
-    /// 触摸事件通知(协议2.2.7): keyType(1触摸/2跌落) + touchType(1单击/2双击/3三击/4长按/5甩动), Protocol flag 0x21
+    /// 触摸事件: keyType为1触摸/2跌落/3 SOS/4连续点击；keyType=1且touchType=6为Release(长按后松手)。连续点击时touchType为次数(1-9)，SOS时不使用。
     DHDevicePushTypeTouchEvent = BLE_KEY_HID_COMMAND
 } DHDevicePushType;
 

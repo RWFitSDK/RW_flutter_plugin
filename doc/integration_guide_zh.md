@@ -47,7 +47,7 @@ dependencies:
   rwfit_ble:
     git:
       url: https://github.com/RWFitSDK/RW_flutter_plugin.git
-      ref: v0.0.9   # 锁定版本，升级时改这里
+      ref: v0.0.10   # 锁定版本，升级时改这里
   # 下方权限申请示例使用；也可替换为 App 现有的权限管理方案
   permission_handler: ^12.0.2
 ```
@@ -287,6 +287,7 @@ await ring.startScan();
 | `isPowerOff` | `bool` | 是否支持关机 |
 | `isFactoryReset` | `bool` | 是否支持恢复出厂设置 |
 | `isPushMessage` | `bool` | 是否支持消息推送 |
+| `isSupportCustomNumberDisplay` | `bool` | 是否支持自定义数字显示 |
 
 **获取方式：**
 
@@ -302,12 +303,27 @@ await ring.startScan();
 
 #### 3.2.1 基础功能指令接口
 
-##### 3.2.1.1 Get SDK Version
+##### 3.2.1.0 获取 SDK 版本
 
 | 方法 | 参数 | 返回 | 说明 |
 |------|------|------|------|
 | `getSdkVersion()` | 无 | `Future<String>` 原生 SDK 版本号 | |
 | `getPluginVersion()` | 无 | `Future<String>` 格式 `pluginVer_sdkVer` | 插件额外提供 |
+
+##### 3.2.1.1 获取蓝牙 MAC 地址
+
+| 方法 | 参数 | 返回 | 说明 |
+|------|------|------|------|
+| `getMacAddress()` | 无 | `Future<String>` MAC 地址，如 `FF:FF:FF:FF:FF:FF` | Android / iOS 均支持，收到 `onFunctionMenu` 后调用 |
+
+> iOS 系统配对后，扫描结果可能不包含 MAC 地址，可在设备就绪后调用本方法获取。需要本地保存时，由 App 自行保存返回值。
+
+```dart
+final mac = await ring.getMacAddress();
+debugPrint('MAC: $mac');
+```
+
+获取失败时抛出 `RwfitException`，可通过 `code` 和 `message` 查看错误信息。
 
 ##### 3.2.1.2 设置用户信息
 
@@ -391,21 +407,40 @@ await ring.startScan();
 
 ##### 3.2.1.8 启动与关闭拍照
 
-| 方法 | 参数 | 返回 | 说明 |
-|------|------|------|------|
-| `controlPhoto(int state)` | `state`：1=进入拍照模式, 0=退出 | `Future<void>` | 拍照控制 |
+> 功能配置表属性：`isTakePhoto`，通过 `menu.raw['isTakePhoto'] == true` 判断是否支持。
+>
+> App 需自行实现相机页面（可使用 Flutter 相机库），负责相机权限、拍照和保存照片。仅打开手机系统相机无法实现本功能。
 
-进入拍照模式后，通过 `onTouchEvent` 监听设备的拍照请求：
+| 方法 | 参数 | 返回 |
+|------|------|------|
+| `controlPhoto(int state)` | 1=进入拍照模式，0=退出 | `Future<void>` |
+
+使用步骤：
+
+1. 设备就绪后，进入 App 相机页面并初始化相机，先订阅拍照事件，再开启拍照模式。
+2. 收到 `TouchAction.cameraTakePicture` 时，调用 App 相机拍照并保存。
+3. 退出相机页面时，关闭拍照模式并取消订阅。
+
+进入相机页面：
 
 ```dart
-final photoSub = rwfit.onTouchEvent.listen((event) {
+final photoSub = ring.onTouchEvent.listen((event) {
   if (event.action == TouchAction.cameraTakePicture) {
-    // 调用 App 相机完成拍照
+    // 调用 App 相机拍照并保存照片
   }
 });
+await ring.controlPhoto(1);
 ```
 
-页面销毁时调用 `photoSub.cancel()`。
+退出相机页面：
+
+```dart
+try {
+  await ring.controlPhoto(0);
+} finally {
+  await photoSub.cancel();
+}
+```
 
 ##### 3.2.1.9 查找设备
 
@@ -511,21 +546,21 @@ final photoSub = rwfit.onTouchEvent.listen((event) {
 |-----|------|-----|------|
 | `isCall` | 来电 | `isSMS` | 短信 |
 | `isQQ` | QQ | `isWechat` | 微信 |
-| `isWhatsapp` | WhatsApp | `isMessenger` | Messenger |
-| `isTwitter` | Twitter | `isLinkedin` | LinkedIn |
-| `isInstagram` | Instagram | `isFacebook` | Facebook |
-| `isLine` | Line | `isWechatWork` | 企业微信 |
-| `isDingding` | 钉钉 | `isEmail` | 邮件 |
-| `isCalendar` | 日历 | `isViber` | Viber |
-| `isSkype` | Skype | `isKakaotalk` | KakaoTalk |
-| `isTumblr` | Tumblr | `isSnapchat` | Snapchat |
-| `isYoutube` | YouTube | `isPinterset` | Pinterest |
-| `isTiktok` | TikTok | `isGmail` | Gmail |
-| `isJLSinaWeiBo` | 微博 | `isJLTelegram` | Telegram |
-| `isJLBand` | Band | `isJLBetween` | Between |
-| `isJLNavercafe` | Naver Cafe | `isJLNetflix` | Netflix |
-| `isMax` | MAX | `isVkim` | VK Messenger |
-| `isOther` | 其他 | | |
+| `isWhatsapp` | WhatsApp | `isTwitter` | Twitter |
+| `isLinkedin` | LinkedIn | `isInstagram` | Instagram |
+| `isFacebook` | Facebook | `isLine` | Line |
+| `isEmail` | 邮件 | `isSkype` | Skype |
+| `isKakaotalk` | KakaoTalk | `isYoutube` | YouTube |
+| `isGmail` | Gmail | `isJLSinaWeiBo` | 微博 |
+| `isJLBand` | Band | `isJLTelegram` | Telegram |
+| `isJLBetween` | Between | `isJLNavercafe` | Naver Cafe |
+| `isJLNetflix` | Netflix | `isMax` | MAX |
+| `isVkim` | VK Messenger | `isRuMail` | Mail.ru |
+| `isYandexMail` | Yandex Mail | `isYandexTaxi` | Yandex Go |
+| `isVkontakte` | VK | `isWildberries` | Wildberries |
+| `isOzon` | Ozon | `isMakc` | МАКС |
+| `isYandexMarket` | Yandex Market | `isGosuslugi` | Gosuslugi |
+| `isYandexFood` | Yandex Food | `isOther` | 其他 |
 
 ###### 3.2.1.14.2 来电控制
 
@@ -753,6 +788,21 @@ await ring.setDrinkReminder(ReminderConfig(
   endHour: 22, endMin: 0,
   intervalMinutes: 30,
 ));
+```
+
+##### 3.2.1.32 自定义数字显示
+
+功能配置表属性：`isSupportCustomNumberDisplay`。仅支持该能力的设备可使用。
+
+`Future<void> showCustomNumber(int number)`
+
+将 App 指定的数字显示到设备，3 秒后退出。再次调用会更新数字并重新计时 3 秒。数字的含义由 App 自行定义。支持 0–9999；小于 0 按 0，大于 9999 按 9999 处理。调用成功后无需等待 3 秒即可继续操作；失败抛出 `RwfitException`。
+
+```dart
+// 收到 onFunctionMenu 并确认支持后调用
+if (menu.isSupportCustomNumberDisplay) {
+  await ring.showCustomNumber(1234);
+}
 ```
 
 #### 3.2.2 健康数据同步(实时单次与全天检测)
@@ -1317,6 +1367,8 @@ if (status.recording) {
 
 录音状态实时推送: `Stream<RecordStatus> get onRecordStatus`。设备侧操作导致录音状态变化时主动推送；主动查询仍使用 `getRecordStatus()`。两端均支持。
 
+查询失败不代表设备空闲。应重新查询并确认当前状态后，再决定调用 `recordControl(true)` 开始录音或 `recordControl(false)` 停止录音。
+
 ##### 3.2.6.3 获取录音文件列表
 
 > 获取设备上全部录音文件的元信息; 原生 SDK 自动拼接分页数据, 一次性返回完整列表.
@@ -1418,6 +1470,8 @@ final local = await ring.getLocalRecordFileList();
 
 > 按文件ID删除设备上的单个录音文件.
 
+> 删除不可恢复；调用前应让用户确认，尤其是尚未下载的文件。
+
 方法说明:
 
 `Future<int> deleteRecordFile(int fileId)`
@@ -1438,6 +1492,7 @@ final local = await ring.getLocalRecordFileList();
 调用示例:
 
 ```dart
+// 在 UI 中获得用户确认后调用
 final result = await ring.deleteRecordFile(fileId); // 0x00 成功
 ```
 
@@ -1458,28 +1513,17 @@ final result = await ring.deleteRecordFile(fileId); // 0x00 成功
 final result = await ring.formatRecordStorage();
 ```
 
-##### 3.2.6.8 播放前置转换
+##### 3.2.6.8 录音播放与格式转换
 
-> iOS 的 AVFoundation 不认 Ogg 容器, 播放前需转 16bit PCM WAV; Android 的 MediaPlayer 原生支持 Ogg Opus.
+下载的 `.opus` 文件为 Ogg Opus 格式，App 应使用支持该格式的播放器播放。
 
-方法说明:
+`Future<String> convertOggToWav(String path)` 保留供已有集成调用，`path` 为本地录音文件路径：
 
-`Future<String> convertOggToWav(String path)`
+| 平台 | 行为 |
+|------|------|
+| Android | 原样返回输入路径，不进行转换 |
+| iOS | 不支持转换；非空路径调用抛出 `RwfitException`，`code == -2`。请直接使用支持 Ogg Opus 的播放器 |
 
-参数说明:
-
-| 参数 | 类型   | 说明 | 值                              |
-| ---- | ------ | ---- | ------------------------------- |
-| path | String |      | 本地 .opus 文件路径;            |
-
-返回值: iOS 返回转换后的 WAV 文件路径（缓存在 Caches/ring_wav，同名不重复转换）；Android 原样返回入参路径。
-
-调用示例:
-
-```dart
-final playable = await ring.convertOggToWav(path);
-// iOS: 播放 playable(.wav); Android: 直接播放原路径(.opus)
-```
 
 ---
 
@@ -1590,6 +1634,12 @@ Future<void> connectAndRead() async {
 ---
 
 ## Flutter 插件修订记录
+
+**v0.0.10_20261012** (2026.10.12)
+
+- 原生 SDK 更新至 Android `RW_SDK_V2_20261012`、iOS `RW_SDK_V2_261012`
+- 新增 `getMacAddress()`，Android / iOS 均支持获取设备 MAC 地址
+- 新增自定义数字显示 `showCustomNumber()` 及能力属性 `isSupportCustomNumberDisplay`，Demo 设备页增加测试入口
 
 **v0.0.9_20260922** (2026.09.22)
 

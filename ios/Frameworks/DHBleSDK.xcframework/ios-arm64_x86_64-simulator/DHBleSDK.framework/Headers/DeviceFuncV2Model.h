@@ -36,11 +36,18 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, assign) UInt32 pushMsgSwitchValue;
 /// 消息类型支持能力高32位，对应消息bit32-bit63
 @property (nonatomic, assign) UInt32 pushMsgSwitchValue2;
+/// 查询是否支持指定消息类型的开关设置。序号范围0-63，见消息类型表；不是页面行号。
+/// Returns whether the switch for a message type is supported (index 0-63, not a UI row).
+/// 不支持消息开关设置或序号越界时返回NO；返回值不表示当前开关状态。
+/// Returns NO when message switches are unsupported or the index is invalid; this is not the current switch state.
+- (BOOL)isMessageTypeSupported:(NSInteger)index;
+
 @property (nonatomic, assign) BOOL isOpenWomenCare; //是否默认打开女性生理周期(之前默认是性别女才打开显示)
 @property (nonatomic, assign) BOOL isAlarm; //是否显示设置闹钟
 @property (nonatomic, assign) BOOL isBackLight; //是否支持屏幕睡眠时间设置/是否显示亮屏时长设置
 @property (nonatomic, assign) BOOL isBackLightSleepMode; //是否支持屏幕睡眠时间设置/是否显示亮屏时长设置
 @property (nonatomic, assign) BOOL isSupportScreenControl; //是否支持即时屏幕亮灭控制
+@property (nonatomic, assign) BOOL isSupportCustomNumberDisplay; //是否支持自定义数字显示
 @property (nonatomic, assign) BOOL isDefaultENSYSTEM; //默认显示英制;
 @property (nonatomic, assign) BOOL isDefaultNoViewWorkout; //默认不显示多运动;
 @property (nonatomic, assign) BOOL isSupportWorkout3; //戒指多运动;
@@ -50,6 +57,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, assign) BOOL isSupportRecording; //是否支持录音功能;
 @property (nonatomic, assign) BOOL isSupportDevicePasswordAuth; //是否支持设备密码认证;
 @property (nonatomic, assign) BOOL isSupportDeviceChallenge; //是否支持设备身份认证;
+@property (nonatomic, assign) BOOL isSupportAI; //是否支持AI功能;
 @property (nonatomic, assign) BOOL isSupportSedentary; //是否支持久坐提醒设置;
 @property (nonatomic, assign) BOOL isDrink; //是否支持喝水提醒设置;
 
@@ -60,6 +68,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, assign) BOOL isSupportMotoVibrationLevel; //是否支持马达震动提醒
 @property (nonatomic, assign) BOOL isSupportAlarmVibrationDuration; //是否支持闹钟震动时长设置
 @property (nonatomic, assign) BOOL isSupportVibrationInterval; //是否支持震动间隔时长设置
+@property (nonatomic, assign) BOOL isSupportVibrationControl; //是否支持自定义震动控制(SUPPORT_VIBRATION bit5)
 @property (nonatomic, assign) BOOL isSupportCountReminder; //是否支持计数提醒间隔设置
 
 

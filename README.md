@@ -32,7 +32,7 @@ dependencies:
   rwfit_ble:
     git:
       url: https://github.com/RWFitSDK/RW_flutter_plugin.git
-      ref: v0.0.9
+      ref: v0.0.10
 ```
 
 Then fetch the dependency:
@@ -48,8 +48,8 @@ flutter pub get
 
 ## Native SDK Version
 
-This release includes Android SDK `RW_SDK_V2_20260922` and iOS SDK
-`RW_SDK_V2_260922`. The iOS SDK is bundled as an XCFramework with device
+This release includes Android SDK `RW_SDK_V2_20261012` and iOS SDK
+`RW_SDK_V2_261012`. The iOS SDK is bundled as an XCFramework with device
 and simulator slices. Simulator builds are supported, but BLE scanning and
 device communication still require a physical iOS device.
 

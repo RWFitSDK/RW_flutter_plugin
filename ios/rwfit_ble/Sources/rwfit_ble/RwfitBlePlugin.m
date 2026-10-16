@@ -79,10 +79,10 @@
     } else if ([m isEqualToString:@"getSDKVersion"]) {
         [self ok:result extra:@{@"version": [DHBleCommand getSDKVersion] ?: @""}];
     } else if ([m isEqualToString:@"getPluginVersion"]) {
-        NSString *v = [NSString stringWithFormat:@"0.0.9_%@", [DHBleCommand getSDKVersion] ?: @""];
+        NSString *v = [NSString stringWithFormat:@"0.0.10_%@", [DHBleCommand getSDKVersion] ?: @""];
         [self ok:result extra:@{@"pluginVersion": v}];
     } else if ([m isEqualToString:@"isBleConnected"]) {
-        [self ok:result extra:@{@"connected": @([DHBleCentralManager isConnected])}];
+        [self ok:result extra:@{@"connected": [NSNumber numberWithBool:[DHBleCentralManager isConnected]]}];
     } else if ([m isEqualToString:@"startScan"]) {
         [DHBleCentralManager shareInstance].connectDelegate = self;
         self.scanning = YES;
@@ -110,6 +110,22 @@
     } else if ([m isEqualToString:@"iOSSetBindedStatus"]) {
         [DHBleCentralManager setBindedStatus:[args[@"isBinded"] boolValue]];
         [self ok:result extra:nil];
+    } else if ([m isEqualToString:@"showCustomNumber"]) {
+        [DHBleCommand showCustomNumber:[args[@"number"] integerValue] block:^(int code, id data) {
+            [self simple:code result:result action:@"showCustomNumber"];
+        }];
+    } else if ([m isEqualToString:@"ringGetMacAddress"]) {
+        [DHBleCommand ringGetMacAddress:^(int code, id data) {
+            [self handleCode:code result:result successBlock:^{
+                DHDeviceInfoModel *model = [data isKindOfClass:DHDeviceInfoModel.class] ? data : nil;
+                NSString *mac = model.macAddr;
+                if (mac.length == 0) {
+                    [self fail:result code:-2 msg:@"device MAC unavailable"];
+                    return;
+                }
+                [self ok:result extra:@{@"mac": mac}];
+            }];
+        }];
     } else if ([m isEqualToString:@"getPower"]) {
         [DHBleCommand getBattery:^(int code, id data) {
             [self handleCode:code result:result successBlock:^{
@@ -187,7 +203,7 @@
     } else if ([m isEqualToString:@"getMuslimCountEnabled"]) {
         [DHBleCommand getMuslimCountSwitch:^(int code, id data) {
             [self handleCode:code result:result successBlock:^{
-                [self ok:result extra:@{@"enabled": @([data integerValue] == 1)}];
+                [self ok:result extra:@{@"enabled": [NSNumber numberWithBool:([data integerValue] == 1)]}];
             }];
         }];
     } else if ([m isEqualToString:@"setMuslimCountEnabled"]) {
@@ -430,7 +446,7 @@
     else if ([m isEqualToString:@"getRingWearDir"]) {
         [DHBleCommand getRingWearHand:^(int code, id data) {
             [self handleCode:code result:result successBlock:^{
-                [self ok:result extra:@{@"isRight": @([data integerValue] == 1)}];
+                [self ok:result extra:@{@"isRight": [NSNumber numberWithBool:([data integerValue] == 1)]}];
             }];
         }];
     }
@@ -504,7 +520,7 @@
     else if ([m isEqualToString:@"getFallDetect"]) {
         [DHBleCommand getFallDetect:^(int code, id data) {
             [self handleCode:code result:result successBlock:^{
-                [self ok:result extra:@{@"enabled": @([data integerValue] == 1)}];
+                [self ok:result extra:@{@"enabled": [NSNumber numberWithBool:([data integerValue] == 1)]}];
             }];
         }];
     }
@@ -930,32 +946,13 @@
     }];
 }
 
-// Ogg Opus → 16bit PCM WAV（DHAudioConverter，务必后台线程执行，参考原生 demo）
+// 保留兼容入口；当前 iOS SDK 不提供 Ogg Opus → WAV 转换。
 - (void)convertOggToWav:(NSString *)path result:(FlutterResult)result {
     if (path.length == 0) {
         [self fail:result code:-1 msg:@"path is required"];
         return;
     }
-    dispatch_async(self.recordFileQueue, ^{
-        NSString *cache =
-            [NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES)
-                firstObject];
-        // 同名同源缓存：重复播放同一录音不产生新文件
-        NSString *outputDirectory = [cache stringByAppendingPathComponent:@"ring_wav"];
-        NSString *fileName = [[path lastPathComponent] stringByDeletingPathExtension];
-        NSString *outputPath = [outputDirectory stringByAppendingPathComponent:
-            [fileName stringByAppendingPathExtension:@"wav"]];
-        [[NSFileManager defaultManager] createDirectoryAtPath:outputDirectory
-                                  withIntermediateDirectories:YES
-                                                   attributes:nil
-                                                        error:nil];
-        NSError *error = nil;
-        if (![DHAudioConverter convertOggOpusFile:path toWAVFile:outputPath error:&error]) {
-            [self fail:result code:-2 msg:error.localizedDescription ?: @"convert to wav failed"];
-            return;
-        }
-        [self ok:result extra:@{@"path": outputPath}];
-    });
+    [self fail:result code:-2 msg:@"Ogg Opus to WAV conversion is not supported on iOS; use an Ogg Opus compatible player"];
 }
 
 #pragma mark - DHBleConnectDelegate（事件源）
@@ -985,7 +982,7 @@
         @"state": @"ready",
         @"name": peripheral.name ?: @"",
         @"mac": peripheral.macAddr ?: @"",
-        @"uuid": peripheral.uuid ?: @"",
+        @"uuid": [self peripheralUUID:peripheral],
         @"supportMenu": [self supportMenuDictionary:deviceFuncModel]
     }];
 }
@@ -1172,7 +1169,7 @@
         DHBatteryInfoModel *model = userInfo[@"dataValue"];
         [self fire:@"rwfit:batteryChanged" data:@{
             @"power": @([model battery]),
-            @"charging": @([model status] == 1)
+            @"charging": [NSNumber numberWithBool:([model status] == 1)]
         }];
         return;
     }
@@ -1185,9 +1182,9 @@
         NSInteger statusValue = [status[@"status"] integerValue];
         [self fire:@"rwfit:recordStatus" data:@{
             @"status": @(statusValue),
-            @"recording": @(status[@"isRecording"] != nil
+            @"recording": [NSNumber numberWithBool:(status[@"isRecording"] != nil
                 ? [status[@"isRecording"] boolValue]
-                : statusValue == 1),
+                : statusValue == 1)],
             @"startTime": @([status[@"startTime"] longLongValue]),
             @"duration": @([status[@"duration"] longLongValue]),
             @"totalCapacity": @([status[@"totalCapacity"] longLongValue]),
@@ -1634,21 +1631,48 @@
 - (NSDictionary *)switchesDictFromAncs:(DHAncsSetModel *)model {
     if (![model isKindOfClass:[DHAncsSetModel class]]) return @{};
     return @{
-        @"isCall": @(model.isCall), @"isSMS": @(model.isSMS), @"isQQ": @(model.isQQ),
-        @"isWechat": @(model.isWechat), @"isWhatsapp": @(model.isWhatsapp), @"isMessenger": @(model.isMessenger),
-        @"isTwitter": @(model.isTwitter), @"isLinkedin": @(model.isLinkedin), @"isInstagram": @(model.isInstagram),
-        @"isFacebook": @(model.isFacebook), @"isLine": @(model.isLine), @"isWechatWork": @(model.isWechatWork),
-        @"isDingding": @(model.isDingding), @"isEmail": @(model.isEmail), @"isCalendar": @(model.isCalendar),
-        @"isViber": @(model.isViber), @"isSkype": @(model.isSkype), @"isKakaotalk": @(model.isKakaotalk),
-        @"isTumblr": @(model.isTumblr), @"isSnapchat": @(model.isSnapchat), @"isYoutube": @(model.isYoutube),
-        @"isPinterset": @(model.isPinterset), @"isTiktok": @(model.isTiktok), @"isGmail": @(model.isGmail),
-        @"isJLSinaWeiBo": @(model.isJLSinaWeiBo), @"isJLBand": @(model.isJLBand), @"isJLTelegram": @(model.isJLTelegram),
-        @"isJLBetween": @(model.isJLBetween), @"isJLNavercafe": @(model.isJLNavercafe), @"isJLNetflix": @(model.isJLNetflix),
-        @"isMax": @(model.isMax), @"isVkim": @(model.isVkim), @"isOther": @(model.isOther)
+        @"isCall": @(model.isCall),
+        @"isSMS": @(model.isSMS),
+        @"isQQ": @(model.isQQ),
+        @"isWechat": @(model.isWechat),
+        @"isWhatsapp": @(model.isWhatsapp),
+        @"isTwitter": @(model.isTwitter),
+        @"isLinkedin": @(model.isLinkedin),
+        @"isInstagram": @(model.isInstagram),
+        @"isFacebook": @(model.isFacebook),
+        @"isLine": @(model.isLine),
+        @"isEmail": @(model.isEmail),
+        @"isSkype": @(model.isSkype),
+        @"isKakaotalk": @(model.isKakaotalk),
+        @"isYoutube": @(model.isYoutube),
+        @"isGmail": @(model.isGmail),
+        @"isJLSinaWeiBo": @(model.isJLSinaWeiBo),
+        @"isJLBand": @(model.isJLBand),
+        @"isJLTelegram": @(model.isJLTelegram),
+        @"isJLBetween": @(model.isJLBetween),
+        @"isJLNavercafe": @(model.isJLNavercafe),
+        @"isJLNetflix": @(model.isJLNetflix),
+        @"isMax": @(model.isMax),
+        @"isVkim": @(model.isVkim),
+        @"isRuMail": @(model.isRuMail),
+        @"isYandexMail": @(model.isYandexMail),
+        @"isYandexTaxi": @(model.isYandexTaxi),
+        @"isVkontakte": @(model.isVkontakte),
+        @"isWildberries": @(model.isWildberries),
+        @"isOzon": @(model.isOzon),
+        @"isMakc": @(model.isMakc),
+        @"isYandexMarket": @(model.isYandexMarket),
+        @"isGosuslugi": @(model.isGosuslugi),
+        @"isYandexFood": @(model.isYandexFood),
+        @"isOther": @(model.isOther)
     };
 }
 
 #pragma mark - 扫描缓存 / payload 工具
+
+- (NSString *)peripheralUUID:(DHPeripheralModel *)model {
+    return (model.uuid.length > 0 ? model.uuid : (model.peripheral.identifier.UUIDString ?: @"")).uppercaseString;
+}
 
 - (NSString *)stringValue:(id)value {
     return [value isKindOfClass:[NSString class]] ? value : @"";
@@ -1656,6 +1680,7 @@
 
 - (void)cachePeripheral:(DHPeripheralModel *)model {
     if (model == nil) return;
+    model.uuid = [self peripheralUUID:model];
     if (model.uuid.length > 0) {
         self.discoveredDevices[[NSString stringWithFormat:@"uuid:%@", model.uuid]] = model;
     }
@@ -1737,6 +1762,7 @@
         @"isSupportFallDetect": @([model isSupportFallDetect]),
         @"isSupportRecording": @([model isSupportRecording]),
         @"isSupportSedentary": @([model isSupportSedentary]),
+        @"isSupportCustomNumberDisplay": @([model isSupportCustomNumberDisplay]),
         @"isDrink": @([model isDrink]),
         @"isFindDevice": @([model isFindDevice]),
         @"isTakePhoto": @([model isTakePhoto]),

@@ -65,7 +65,7 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
         EventChannel.StreamHandler, ActivityAware {
 
     private static final String TAG = "RwfitBlePlugin";
-    private static final String PLUGIN_VERSION = "0.0.9";
+    private static final String PLUGIN_VERSION = "0.0.10";
 
     private MethodChannel methodChannel;
     private EventChannel eventChannel;
@@ -212,12 +212,34 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
                     break;
                 }
                 case "disconnect":
+                    cb().clearConnectedMac();
                     DHBleSdk.INSTANCE.disconnect();
                     result.success(success());
                     break;
                 case "iOSSetBindedStatus": // Android 无副作用
                     result.success(success());
                     break;
+                case "showCustomNumber": {
+                    DHBleSdk.INSTANCE.showCustomNumber(i(call, "number"), new CustomStatusCallback() {
+                        @Override public void onSuccess() { result.success(success()); }
+                        @Override public void onFail(int errorCode) {
+                            result.error(errorCode, "showCustomNumber failed");
+                        }
+                    });
+                    break;
+                }
+                // Android 直接返回连接回调中的 MAC，无需下发 BLE 查询指令。
+                case "ringGetMacAddress": {
+                    String mac = RWFitCallbackManager.getInstance().getConnectedMac();
+                    if (mac.isEmpty()) {
+                        result.error(-2, "device MAC unavailable");
+                        break;
+                    }
+                    Map<String, Object> r = success();
+                    r.put("mac", mac);
+                    result.success(r);
+                    break;
+                }
                 case "getPower": getPower(result); break;
                 case "getFirmwareVersion": getFirmwareVersion(result); break;
                 case "controlHealthData": controlHealthData(call, result); break;
@@ -364,6 +386,7 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
             return;
         }
         DHBleSdk.INSTANCE.initSDK(activity);
+        if (!DHBleSdk.INSTANCE.isBleConnected()) cb().clearConnectedMac();
         DHBleSdk.INSTANCE.setConnectBleCallback(cb());
         ScanBleService.getService().initBle(activity);
         ScanBleService.getService().registerScanBleCallback(cb());
@@ -383,6 +406,7 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
         Integer rssi = call.argument("rssi");
         device.setBleRssi(rssi != null ? rssi : 0);
         DHBleSdk.INSTANCE.setConnectBleCallback(cb());
+        if (!mac.equalsIgnoreCase(cb().getConnectedMac())) cb().clearConnectedMac();
         DHBleSdk.INSTANCE.connectDeviceWithModel(device);
         return true;
     }
@@ -1219,6 +1243,7 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
     private void unbind(final Reply result) {
         DHBleSdk.INSTANCE.subscribeStatus(new CommonStatusCallback() {
             @Override public void onSuccess(int msgId) {
+                cb().clearConnectedMac();
                 result.success(success());
                 DHBleSdk.INSTANCE.dispose(this);
             }
@@ -1312,6 +1337,7 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
         menu.put("isSupportFallDetect", bean.isSupportFallDetect());
         menu.put("isSupportRecording", bean.isSupportRecording());
         menu.put("isSupportSedentary", bean.isSupportSedentary());
+        menu.put("isSupportCustomNumberDisplay", bean.isSupportCustomNumberDisplay());
         menu.put("isDrink", bean.isDrink());
         menu.put("isFindDevice", bean.isFindDevice());
         menu.put("isTakePhoto", bean.isTakePhoto());

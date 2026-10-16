@@ -11,6 +11,7 @@ class DemoCapabilities {
 
 /// Flutter 桥接公开的 supportMenu key。
 abstract final class DemoCapabilityKey {
+  static const customNumberDisplay = 'isSupportCustomNumberDisplay';
   static const alarm = 'isAlarm';
   static const brightScreenTime = 'isBrightScreenTime';
   static const brightScreenSleepTime = 'isBrightScreenSleepTime';
@@ -36,6 +37,7 @@ abstract final class DemoCapabilityKey {
   static const countReminder = 'isSupportCountReminder';
   static const sensorRawPpg = 'isSupportSensorRawPPG';
   static const fallDetect = 'isSupportFallDetect';
+  static const recording = 'isSupportRecording';
   static const findDevice = 'isFindDevice';
   static const takePhoto = 'isTakePhoto';
   static const ledLight = 'isLedLight';

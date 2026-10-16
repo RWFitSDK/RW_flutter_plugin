@@ -47,7 +47,7 @@ dependencies:
   rwfit_ble:
     git:
       url: https://github.com/RWFitSDK/RW_flutter_plugin.git
-      ref: v0.0.9   # Pin the version; change this when upgrading
+      ref: v0.0.10   # Pin the version; change this when upgrading
   # Used by the permission example below. You may use the app's existing
   # permission-management solution instead.
   permission_handler: ^12.0.2
@@ -289,6 +289,7 @@ await ring.startScan();
 | `isPowerOff` | `bool` | Power-off support |
 | `isFactoryReset` | `bool` | Factory-reset support |
 | `isPushMessage` | `bool` | Message-push support |
+| `isSupportCustomNumberDisplay` | `bool` | Custom number display support |
 
 **How to obtain capabilities:**
 
@@ -304,12 +305,27 @@ await ring.startScan();
 
 #### 3.2.1 Basic Command APIs
 
-##### 3.2.1.1 Get SDK Version
+##### 3.2.1.0 Get SDK Version
 
 | Method | Parameters | Returns | Description |
 |--------|------------|---------|-------------|
 | `getSdkVersion()` | None | `Future<String>` | Native SDK version |
 | `getPluginVersion()` | None | `Future<String>` in `pluginVer_sdkVer` format | Plugin-specific API |
+
+##### 3.2.1.1 Get Bluetooth MAC Address
+
+| Method | Parameters | Returns | Description |
+|--------|------------|---------|-------------|
+| `getMacAddress()` | None | `Future<String>` MAC address, e.g. `FF:FF:FF:FF:FF:FF` | Supported on Android and iOS; call after `onFunctionMenu` |
+
+> After iOS system pairing, scan results may not include the MAC address. Call this method once the device is ready to obtain it. If local storage is needed, the app should save the returned value.
+
+```dart
+final mac = await ring.getMacAddress();
+debugPrint('MAC: $mac');
+```
+
+Failures throw `RwfitException`. Check `code` and `message` for error details.
 
 ##### 3.2.1.2 Set User Information
 
@@ -391,21 +407,40 @@ await ring.startScan();
 
 ##### 3.2.1.8 Start and Stop Camera Mode
 
-| Method | Parameters | Returns | Description |
-|--------|------------|---------|-------------|
-| `controlPhoto(int state)` | 1=enter camera mode, 0=exit | `Future<void>` | Control camera mode |
+> Capability: `isTakePhoto`. Check support with `menu.raw['isTakePhoto'] == true`.
+>
+> The app must provide its own camera page, for example using a Flutter camera library, and handle camera permissions, photo capture, and saving. Simply opening the system camera does not enable this feature.
 
-After camera mode is enabled, listen for camera requests through `onTouchEvent`:
+| Method | Parameters | Returns |
+|--------|------------|---------|
+| `controlPhoto(int state)` | 1=enter camera mode, 0=exit | `Future<void>` |
+
+Steps:
+
+1. Once the device is ready, open the app's camera page and initialize the camera. Subscribe to capture events before enabling camera mode.
+2. On `TouchAction.cameraTakePicture`, use the app's camera to take and save a photo.
+3. When leaving the camera page, disable camera mode and cancel the subscription.
+
+On entering the camera page:
 
 ```dart
-final photoSub = rwfit.onTouchEvent.listen((event) {
+final photoSub = ring.onTouchEvent.listen((event) {
   if (event.action == TouchAction.cameraTakePicture) {
-    // Trigger the app camera.
+    // Use the app's camera to take and save a photo
   }
 });
+await ring.controlPhoto(1);
 ```
 
-Call `photoSub.cancel()` when the page is disposed.
+On leaving the camera page:
+
+```dart
+try {
+  await ring.controlPhoto(0);
+} finally {
+  await photoSub.cancel();
+}
+```
 
 ##### 3.2.1.9 Find Device
 
@@ -509,23 +544,23 @@ Use `copyWith(...)` to change selected fields while preserving the others.
 
 | Key | Description | Key | Description |
 |-----|-------------|-----|-------------|
-| `isCall` | Incoming call | `isSMS` | SMS |
+| `isCall` | Calls | `isSMS` | SMS |
 | `isQQ` | QQ | `isWechat` | WeChat |
-| `isWhatsapp` | WhatsApp | `isMessenger` | Messenger |
-| `isTwitter` | Twitter | `isLinkedin` | LinkedIn |
-| `isInstagram` | Instagram | `isFacebook` | Facebook |
-| `isLine` | Line | `isWechatWork` | WeCom |
-| `isDingding` | DingTalk | `isEmail` | Email |
-| `isCalendar` | Calendar | `isViber` | Viber |
-| `isSkype` | Skype | `isKakaotalk` | KakaoTalk |
-| `isTumblr` | Tumblr | `isSnapchat` | Snapchat |
-| `isYoutube` | YouTube | `isPinterset` | Pinterest |
-| `isTiktok` | TikTok | `isGmail` | Gmail |
-| `isJLSinaWeiBo` | Weibo | `isJLTelegram` | Telegram |
-| `isJLBand` | Band | `isJLBetween` | Between |
-| `isJLNavercafe` | Naver Cafe | `isJLNetflix` | Netflix |
-| `isMax` | MAX | `isVkim` | VK Messenger |
-| `isOther` | Other | | |
+| `isWhatsapp` | WhatsApp | `isTwitter` | Twitter |
+| `isLinkedin` | LinkedIn | `isInstagram` | Instagram |
+| `isFacebook` | Facebook | `isLine` | Line |
+| `isEmail` | Email | `isSkype` | Skype |
+| `isKakaotalk` | KakaoTalk | `isYoutube` | YouTube |
+| `isGmail` | Gmail | `isJLSinaWeiBo` | Sina Weibo |
+| `isJLBand` | Band | `isJLTelegram` | Telegram |
+| `isJLBetween` | Between | `isJLNavercafe` | Naver Cafe |
+| `isJLNetflix` | Netflix | `isMax` | MAX |
+| `isVkim` | VK Messenger | `isRuMail` | Mail.ru |
+| `isYandexMail` | Yandex Mail | `isYandexTaxi` | Yandex Go |
+| `isVkontakte` | VK | `isWildberries` | Wildberries |
+| `isOzon` | Ozon | `isMakc` | МАКС |
+| `isYandexMarket` | Yandex Market | `isGosuslugi` | Gosuslugi |
+| `isYandexFood` | Yandex Food | `isOther` | Other |
 
 ###### 3.2.1.14.2 Call Control
 
@@ -726,6 +761,21 @@ await ring.setDrinkReminder(ReminderConfig(
   endHour: 22, endMin: 0,
   intervalMinutes: 30,
 ));
+```
+
+##### 3.2.1.32 Custom Number Display
+
+Capability: `isSupportCustomNumberDisplay`. Available only on devices that support this capability.
+
+`Future<void> showCustomNumber(int number)`
+
+Displays an app-defined number on the device for 3 seconds. Calling again updates the number and restarts the 3-second timer. The app defines what the number means. Values are clamped to 0–9999. After a successful call, the app can continue without waiting for the 3-second display period to end. Failures throw `RwfitException`.
+
+```dart
+// Call after onFunctionMenu confirms support
+if (menu.isSupportCustomNumberDisplay) {
+  await ring.showCustomNumber(1234);
+}
 ```
 
 #### 3.2.2 Health Data: Real-Time Measurement and All-Day Monitoring
@@ -1267,6 +1317,8 @@ final status = await ring.recordControl(true); // 0x01 = recording started
 > recommended to query once after connecting. Active queries use `getRecordStatus()`; status
 > changes made on the device side arrive via the `onRecordStatus` push (both platforms).
 
+A failed query does not mean the device is idle. Query again and confirm the current status before choosing `recordControl(true)` to start recording or `recordControl(false)` to stop recording.
+
 Method: `Future<RecordStatus> getRecordStatus()` · Stream: `Stream<RecordStatus> get onRecordStatus`
 
 **`RecordStatus` fields:**
@@ -1373,7 +1425,10 @@ final local = await ring.getLocalRecordFileList();
 Method: `Future<int> deleteRecordFile(int fileId)` — deletes one recording from the device.
 Return code 0x00 = success, anything else = failure.
 
+Deletion is irreversible. Ask the user to confirm, especially for files that have not been downloaded.
+
 ```dart
+// Call only after the user confirms in the UI
 final result = await ring.deleteRecordFile(fileId); // 0x00 = success
 ```
 
@@ -1387,17 +1442,17 @@ ask the user to confirm before formatting.** Return code 0x00 = success.
 final result = await ring.formatRecordStorage();
 ```
 
-##### 3.2.6.8 Playback Pre-conversion
+##### 3.2.6.8 Recording Playback and Format Conversion
 
-Method: `Future<String> convertOggToWav(String path)` — `path` is a local .opus file. On iOS it
-converts Ogg Opus to 16-bit PCM WAV (AVFoundation does not accept the Ogg container) and returns
-the new path (cached under Caches/ring_wav; the same file is not converted twice); Android's
-MediaPlayer plays Ogg Opus natively and the input path is returned unchanged.
+Downloaded `.opus` files use the Ogg Opus format. Play them with a player that supports this format.
 
-```dart
-final playable = await ring.convertOggToWav(path);
-// iOS: play playable (.wav); Android: play the original path (.opus)
-```
+`Future<String> convertOggToWav(String path)` remains available for existing integrations. `path` is a local recording file path:
+
+| Platform | Behavior |
+|----------|----------|
+| Android | Returns the input path unchanged; no conversion is performed |
+| iOS | Conversion is unsupported. A non-empty path results in `RwfitException` with `code == -2`. Use an Ogg Opus compatible player directly |
+
 
 ---
 
@@ -1509,6 +1564,12 @@ Future<void> connectAndRead() async {
 ---
 
 ## Flutter Plugin Revision History
+
+**v0.0.10_20261012** (2026.10.12)
+
+- Updated native SDKs to Android `RW_SDK_V2_20261012` and iOS `RW_SDK_V2_261012`
+- Added `getMacAddress()` to obtain the device MAC address on Android and iOS
+- Added `showCustomNumber()` and the `isSupportCustomNumberDisplay` capability, with a test entry on the Demo device page
 
 **v0.0.9_20260922** (2026.09.22)
 
