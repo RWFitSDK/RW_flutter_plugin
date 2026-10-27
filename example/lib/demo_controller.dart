@@ -24,6 +24,10 @@ class DemoController extends ChangeNotifier {
   bool _disposed = false;
   Future<void>? _infoRefresh;
   int? _infoRefreshGeneration;
+  Future<void>? _unbindTask;
+  Future<void> _storeTask = Future<void>.value();
+  int _bindingGeneration = 0;
+  bool _ignoreDeviceEvents = false;
 
   /// 同一设备重连也属于新会话，异步查询不得写回上一次连接的结果。
   int get connectionGeneration => _connectionGeneration;
@@ -62,6 +66,13 @@ class DemoController extends ChangeNotifier {
     _subscriptions.add(
       ring.onConnectState.listen((event) {
         if (_disposed) return;
+        if (_ignoreDeviceEvents) {
+          // 解绑后的旧回调不能恢复设备；新的显式连接从 connecting 开始。
+          if (event.state != ConnectState.connecting || _unbindTask != null) {
+            return;
+          }
+          _ignoreDeviceEvents = false;
+        }
         connectionState = event.state;
         if (event.state != ConnectState.connected) {
           _connectionGeneration++;
@@ -92,6 +103,7 @@ class DemoController extends ChangeNotifier {
     _subscriptions.add(ring.onFunctionMenu.listen(_handleFunctionMenu));
     _subscriptions.add(
       ring.onSyncResult.listen((result) {
+        if (_disposed || !connected || _unbindTask != null) return;
         final parsed = DemoHealthStore.parseSyncResult(result);
         _appendHealthRecords(result.type, parsed);
         _receivedSyncTypes.add(result.type);
@@ -107,14 +119,16 @@ class DemoController extends ChangeNotifier {
     );
     _subscriptions.add(
       ring.onSyncProgress.listen((progress) {
+        if (_disposed || !connected || _unbindTask != null) return;
         if (syncing && progress >= 100) syncProgress = 0.98;
         notifyListeners();
       }),
     );
     _subscriptions.add(
       ring.onSyncFinish.listen((_) async {
-        if (_disposed || !connected || !syncing) return;
+        if (_disposed || !connected || !syncing || _unbindTask != null) return;
         final generation = _connectionGeneration;
+        final bindingGeneration = _bindingGeneration;
         syncing = false;
         syncProgress = 1;
         lastSyncAt = DateTime.now();
@@ -123,7 +137,11 @@ class DemoController extends ChangeNotifier {
         if (waiter != null && !waiter.isCompleted) waiter.complete();
         notifyListeners();
         try {
-          await DeviceStore.saveLastSyncAt(lastSyncAt!);
+          final timestamp = lastSyncAt!;
+          await _queueStore(() async {
+            if (_disposed || bindingGeneration != _bindingGeneration) return;
+            await DeviceStore.saveLastSyncAt(timestamp);
+          });
         } catch (error) {
           if (!_isCurrentSession(generation)) return;
           lastError = '$error';
@@ -133,6 +151,7 @@ class DemoController extends ChangeNotifier {
     );
     _subscriptions.add(
       ring.onSyncError.listen((error) {
+        if (_disposed || !connected || _unbindTask != null) return;
         lastError = 'code=${error['code']}';
         _failSyncWaiter(StateError(lastError!));
         notifyListeners();
@@ -140,6 +159,7 @@ class DemoController extends ChangeNotifier {
     );
     _subscriptions.add(
       ring.onRealtimeData.listen((data) {
+        if (_disposed || !connected || _unbindTask != null) return;
         final record = DemoHealthStore.parseRealtime(data);
         if (record == null) return;
         _realtimeRecords[record.type] = record;
@@ -149,11 +169,13 @@ class DemoController extends ChangeNotifier {
   }
 
   Future<void> _handleFunctionMenu(FunctionMenu menu) async {
-    if (_disposed) return;
+    if (_disposed || _ignoreDeviceEvents || _unbindTask != null) return;
     final incomingId = _identity(menu.uuid, menu.mac);
     try {
       final previousDevice = device;
       final changedDevice = deviceId != incomingId;
+      if (changedDevice) _bindingGeneration++;
+      final bindingGeneration = _bindingGeneration;
       final mac = menu.mac.isNotEmpty
           ? menu.mac
           : (!changedDevice ? previousDevice?.mac ?? '' : '');
@@ -186,13 +208,19 @@ class DemoController extends ChangeNotifier {
       }
       _completeReadyWaiters();
       notifyListeners();
-      // 收到功能表后按原有方式分项保存，不因同一设备断连而中断保存。
+      // 保存与解绑清理串行执行，避免旧功能表在 clear() 后写回绑定记录。
       final connectedDevice = device!;
       try {
-        await DeviceStore.save(connectedDevice);
-        await DeviceStore.saveCapabilities(menu.raw);
-        if (changedDevice) await DeviceStore.clearLastSyncAt();
-        await ring.iosSetBindedStatus(true);
+        await _queueStore(() async {
+          if (_disposed || bindingGeneration != _bindingGeneration) return;
+          await DeviceStore.save(connectedDevice);
+          await DeviceStore.saveCapabilities(menu.raw);
+          if (changedDevice) await DeviceStore.clearLastSyncAt();
+          // 解绑已经开始时不再恢复 iOS SDK 绑定态。
+          if (_unbindTask == null && bindingGeneration == _bindingGeneration) {
+            await ring.iosSetBindedStatus(true);
+          }
+        });
       } catch (error) {
         if (_disposed || deviceId != incomingId) return;
         lastError = '$error';
@@ -206,6 +234,13 @@ class DemoController extends ChangeNotifier {
       lastError = '$error';
       notifyListeners();
     }
+  }
+
+  Future<void> _queueStore(Future<void> Function() action) {
+    final task = _storeTask.then((_) => action());
+    // 单次持久化失败由调用方处理，不阻断后续解绑清理。
+    _storeTask = task.catchError((Object _) {});
+    return task;
   }
 
   /// 确认当前设备就绪后调用，命令排队和超时由 SDK 处理。
@@ -314,14 +349,20 @@ class DemoController extends ChangeNotifier {
 
   Future<void> reconnect() async {
     if (_disposed) throw StateError('Demo controller disposed');
+    if (_unbindTask != null) throw StateError('Unbinding device');
     final savedDevice = device;
     if (savedDevice == null) throw StateError('No saved device');
+    final bindingGeneration = _bindingGeneration;
     if (connected || await ring.isConnected()) {
       if (ready) return;
     }
     if (_disposed) throw StateError('Demo controller disposed');
+    if (_unbindTask != null || bindingGeneration != _bindingGeneration) {
+      throw StateError('Device binding changed');
+    }
     connectionState = ConnectState.connecting;
     _connectionGeneration++;
+    final generation = _connectionGeneration;
     ready = false;
     lastError = null;
     notifyListeners();
@@ -331,13 +372,17 @@ class DemoController extends ChangeNotifier {
       await Future.wait<void>([
         () async {
           await ring.iosSetBindedStatus(true);
-          if (_disposed) return;
+          if (_disposed ||
+              generation != _connectionGeneration ||
+              _unbindTask != null) {
+            return;
+          }
           await ring.reconnect(savedDevice);
         }(),
         waiter.future.timeout(const Duration(seconds: 20)),
       ], eagerError: true);
     } catch (error) {
-      if (!_disposed && !connected) {
+      if (!_disposed && generation == _connectionGeneration && !connected) {
         connectionState = ConnectState.failed;
         lastError = '$error';
         notifyListeners();
@@ -355,7 +400,7 @@ class DemoController extends ChangeNotifier {
     _realtimeRecords.clear();
     _completeReadyWaiters(StateError('Connection closed'));
     _failSyncWaiter(StateError('Connection closed during sync'));
-    notifyListeners();
+    if (!_disposed) notifyListeners();
   }
 
   Future<void> disconnect() async {
@@ -363,10 +408,15 @@ class DemoController extends ChangeNotifier {
     if (!_disposed) _closeConnection();
   }
 
-  Future<void> unbind() async {
+  Future<void> unbind() =>
+      _unbindTask ??= _unbind().whenComplete(() => _unbindTask = null);
+
+  Future<void> _unbind() async {
     final unboundId = deviceId;
     await ring.unbind();
-    if (_disposed || deviceId != unboundId) return;
+    if (deviceId != unboundId) return;
+    _ignoreDeviceEvents = true;
+    _bindingGeneration++;
     _closeConnection();
     device = null;
     capabilities = const DemoCapabilities.empty();
@@ -376,12 +426,18 @@ class DemoController extends ChangeNotifier {
     macAddress = null;
     deviceInfoError = null;
     lastSyncAt = null;
-    notifyListeners();
-    try {
-      await ring.iosSetBindedStatus(false);
-    } finally {
-      await DeviceStore.clear();
-    }
+    lastError = null;
+    _receivedSyncTypes.clear();
+    _infoRefresh = null;
+    _infoRefreshGeneration = null;
+    if (!_disposed) notifyListeners();
+    await _queueStore(() async {
+      try {
+        await ring.iosSetBindedStatus(false);
+      } finally {
+        await DeviceStore.clear();
+      }
+    });
   }
 
   Future<void> syncAllHealthData() async {

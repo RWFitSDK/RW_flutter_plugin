@@ -15,6 +15,8 @@
 @property (nonatomic, assign) BOOL observersRegistered;
 @property (nonatomic, strong) NSTimer *scanTimeoutTimer;
 @property (nonatomic, assign) BOOL forwardHealthSyncEvents;
+@property (nonatomic, assign) BOOL bindingCleared;
+@property (nonatomic, assign) NSUInteger bindingGeneration;
 @property (nonatomic, strong) NSMutableDictionary<NSString *, DHPeripheralModel *> *discoveredDevices;
 // 录音：列表元数据缓存（transfer 进度事件里补齐 duration/timestamp/fileSize）
 @property (nonatomic, strong) NSMutableDictionary<NSNumber *, NSDictionary *> *recordFileMetadata;
@@ -104,6 +106,9 @@
         [DHBleCentralManager disconnectDevice];
         [self ok:result extra:nil];
     } else if ([m isEqualToString:@"reconnectDevice"]) {
+        self.bindingGeneration++;
+        self.bindingCleared = NO;
+        [self fire:@"rwfit:connectState" data:@{@"state": @"connecting"}];
         [DHBleCentralManager shareInstance].connectDelegate = self;
         [DHBleCentralManager checkAndAutoReconnectDevice];
         [self ok:result extra:nil];
@@ -299,8 +304,15 @@
         self.forwardHealthSyncEvents = NO;
         [self ok:result extra:nil];
     } else if ([m isEqualToString:@"unbind"]) {
+        self.bindingCleared = YES;
+        self.bindingGeneration++;
+        self.deviceFuncModel = nil;
+        self.scanning = NO;
+        [self cancelScanTimeout];
+        [self.discoveredDevices removeAllObjects];
         [DHBleCentralManager setBindedStatus:NO];
         [DHBleCentralManager disconnectDevice];
+        [self fire:@"rwfit:connectState" data:@{@"state": @"disconnected"}];
         [self ok:result extra:nil];
     } else if ([m isEqualToString:@"controlTakePhoto"]) {
         [DHBleCommand controlCamera:[args[@"state"] integerValue] block:^(int code, id data) {
@@ -685,6 +697,8 @@
         [self fail:result code:-1 msg:@"device not in scan cache; call startScan() first, or use reconnectDevice()"];
         return;
     }
+    self.bindingGeneration++;
+    self.bindingCleared = NO;
     [DHBleCentralManager shareInstance].connectDelegate = self;
     [self fire:@"rwfit:connectState" data:@{
         @"state": @"connecting",
@@ -971,12 +985,14 @@
 }
 
 - (void)centralManagerDidConnectPeripheral:(CBPeripheral *)peripheral {
+    if (self.bindingCleared) return;
     self.scanning = NO;
     [self cancelScanTimeout];
     [self fire:@"rwfit:connectState" data:[self connectStatePayload:@"connected" peripheral:peripheral extra:nil]];
 }
 
 - (void)centralManagerDidFunctionMenu:(DeviceFuncV2Model *)deviceFuncModel peripheral:(DHPeripheralModel *)peripheral {
+    if (self.bindingCleared) return;
     self.deviceFuncModel = deviceFuncModel;
     [self fire:@"rwfit:functionMenu" data:@{
         @"state": @"ready",
@@ -988,12 +1004,14 @@
 }
 
 - (void)centralManagerDidDisconnectPeripheral:(CBPeripheral *)peripheral {
+    self.deviceFuncModel = nil;
     self.scanning = NO;
     [self cancelScanTimeout];
     [self fire:@"rwfit:connectState" data:[self connectStatePayload:@"disconnected" peripheral:peripheral extra:nil]];
 }
 
 - (void)centralManagerDidFailedPeripheral:(CBPeripheral *)peripheral {
+    if (self.bindingCleared) return;
     self.scanning = NO;
     [self cancelScanTimeout];
     [self fire:@"rwfit:connectState" data:[self connectStatePayload:@"failed" peripheral:peripheral extra:@{@"reason": @"unknown"}]];
@@ -1004,7 +1022,13 @@
 - (void)fire:(NSString *)name data:(NSDictionary *)data {
     NSMutableDictionary *d = data ? [data mutableCopy] : [NSMutableDictionary dictionary];
     d[@"event"] = name;
+    NSUInteger generation = self.bindingGeneration;
+    BOOL deviceEvent = ![name hasPrefix:@"rwfit:scan"];
+    BOOL disconnected = [name isEqualToString:@"rwfit:connectState"] &&
+        [data[@"state"] isEqualToString:@"disconnected"];
     dispatch_async(dispatch_get_main_queue(), ^{
+        if (deviceEvent && (generation != self.bindingGeneration ||
+                           (self.bindingCleared && !disconnected))) return;
         if (self.eventSink) self.eventSink(d);
     });
 }

@@ -44,6 +44,7 @@ import com.example.blesdk.callback.data.*;
 import com.example.blesdk.callback.status.*;
 import com.example.blesdk.utils.BlueToothUtils;
 import com.example.blesdk.utils.BleActivityMode;
+import com.example.blesdk.utils.Constants;
 import com.example.blesdk.utils.OpusBinConverter;
 import com.example.blesdk.utils.WorkoutControlType;
 
@@ -66,6 +67,8 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
 
     private static final String TAG = "RwfitBlePlugin";
     private static final String PLUGIN_VERSION = "0.0.10";
+    // BLE_KEY_IDENTITY（混淆 AAR 不对外暴露 BleKey）。
+    private static final int UNBIND_COMMAND_ID = 0x0301;
 
     private MethodChannel methodChannel;
     private EventChannel eventChannel;
@@ -405,6 +408,7 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
         device.setBleMac(mac);
         Integer rssi = call.argument("rssi");
         device.setBleRssi(rssi != null ? rssi : 0);
+        cb().beginConnection();
         DHBleSdk.INSTANCE.setConnectBleCallback(cb());
         if (!mac.equalsIgnoreCase(cb().getConnectedMac())) cb().clearConnectedMac();
         DHBleSdk.INSTANCE.connectDeviceWithModel(device);
@@ -1241,18 +1245,44 @@ public class RwfitBlePlugin implements FlutterPlugin, MethodCallHandler,
     }
 
     private void unbind(final Reply result) {
+        // 离线解绑不发设备指令；取消可能尚未结束的重连，并让 App 清除本地记录。
+        if (!DHBleSdk.INSTANCE.isBleConnected()) {
+            finishUnbind(result);
+            return;
+        }
         DHBleSdk.INSTANCE.subscribeStatus(new CommonStatusCallback() {
+            private boolean completed;
             @Override public void onSuccess(int msgId) {
-                cb().clearConnectedMac();
-                result.success(success());
+                if (msgId != UNBIND_COMMAND_ID || completed) return;
+                completed = true;
                 DHBleSdk.INSTANCE.dispose(this);
+                finishUnbind(result);
             }
             @Override public void onFail(int msgId, int errorCode) {
-                result.error(errorCode, "unbind failed");
+                if (msgId != UNBIND_COMMAND_ID || completed) return;
+                completed = true;
                 DHBleSdk.INSTANCE.dispose(this);
+                // 检查连接后、实际发指令前断线，也按离线解绑完成。
+                if (errorCode == Constants.ERROR_DEVICE_UN_CONNECT) {
+                    finishUnbind(result);
+                } else {
+                    result.error(errorCode, "unbind failed");
+                }
             }
         });
         DHBleSdk.INSTANCE.unbindJL();
+    }
+
+    private void finishUnbind(final Reply result) {
+        // ACK 只确认设备指令，连接释放仍需主动执行；统一在主线程收尾。
+        main.post(() -> {
+            cb().clearBinding();
+            DHBleSdk.INSTANCE.disconnect();
+            JSONObject state = new JSONObject();
+            state.put("state", "disconnected");
+            cb().fireEvent("rwfit:connectState", state);
+            result.success(success());
+        });
     }
 
     // ==================== 设备信息 ====================

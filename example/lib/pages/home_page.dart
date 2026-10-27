@@ -7,6 +7,7 @@ import '../demo_theme.dart';
 import '../health_metadata.dart';
 import '../health_store.dart';
 import '../i18n.dart';
+import '../sdk_log_share.dart';
 import '../support_menu.dart';
 import '../widgets/device_card.dart';
 import 'device_page.dart';
@@ -26,6 +27,7 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   late final DemoController _controller;
   int _tabIndex = 0;
+  bool _sharingSdkLogs = false;
 
   @override
   void initState() {
@@ -68,11 +70,40 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  /// 导出两端 SDK 落盘日志并拉起系统分享（zip）。
+  Future<void> _shareSdkLogs() async {
+    if (_sharingSdkLogs) return;
+    setState(() => _sharingSdkLogs = true);
+    try {
+      final shared = await SdkLogShare.share();
+      if (!mounted || shared) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(demoTr('暂无 SDK 日志', 'No SDK logs yet'))),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${demoTr('SDK 日志分享失败', 'Failed to share SDK logs')}: $error',
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _sharingSdkLogs = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
       title: Text(demoTr('RW 健康', 'RW Health')),
       actions: [
+        IconButton(
+          icon: const Icon(Icons.ios_share),
+          tooltip: demoTr('分享 SDK 日志', 'Share SDK logs'),
+          onPressed: _sharingSdkLogs ? null : _shareSdkLogs,
+        ),
         TextButton(
           onPressed: context.toggleLanguage,
           child: Text(
